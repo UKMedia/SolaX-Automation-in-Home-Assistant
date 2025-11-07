@@ -1,113 +1,135 @@
 # SolaX-Automation-in-Home-Assistant
 
-# ⚡ Home Assistant – SolaX Integration (Custom YAML Examples)
+# ⚡ Home Assistant — DAI / RBC Energy Automation Framework (SolaX)
 
-This repository contains my working **YAML automations, templates, and helper usage patterns** for managing a **SolaX Hybrid Inverter** setup in Home Assistant.
+This repository contains my **DAI (Dynamic AI-driven Inverter control)** and **RBC (Robust Bias Correction)** automations, scripts, helpers, and supporting YAML for **SolaX Hybrid inverter** systems running under **Home Assistant**.
 
-The goal of this repo is to help Home Assistant users who already have their SolaX inverter exposed in HA, but want to go further than basic monitoring — including coordinated inverter mode control, battery charge strategy, and scenario-based automation.
-
-> **Note:** My advanced DAI/RBC adaptive energy management logic is stored in a separate repository.  
-> This repository focuses specifically on the practical **SolaX integration layer**.
+It is intended for **medium-level HA users** who want a **coherent, scalable energy-automation architecture** that goes beyond one-off automations: day-ahead planning, safe inverter control, and bias-learning loops that adapt to real usage and PV.
 
 ---
 
-## 🏠 System Overview
+## 🧭 What DAI / RBC Does (at a glance)
 
-My system consists of:
+- **DAI — Planning & Control**
+  - Day-ahead **grid-charge planning** (respecting tariff windows)
+  - **Mode orchestration** (Self-Use, Charge, Force-Discharge) with safety guards
+  - **Evening Buffer** logic to ensure evening supply without surprise imports
+  - Idempotent writes with confirmation/dwell and restart-safe behaviour
 
-| Component | Details |
-|---------|---------|
-| Inverters | SolaX X1 Hybrid (parallel configuration) |
-| Battery Storage | ~23 kWh total |
-| Home Assistant | Running on HA OS |
-| SolaX Integration Method | HA native SolaX integration (or API / MQTT depending on environment) |
+- **RBC — Learning & Stability**
+  - Bias learning for **PV Daily**, **Demand Daily**, and **Evening (16–22)** windows
+  - “Safety-first” adjusted forecasts to prevent under-charging events
+  - Upward-only same-day adjustment and daily lock points
+  - Consistent mapper pipeline (Bias → Percent suggestions)
 
-Your hardware does **not** need to match exactly — the YAML logic is designed to be **adaptable**.
-
----
-
-## 📦 What This Repository Includes
-
-| Folder / File | Description |
-|--------------|-------------|
-| `sensors/` | Template & derived sensors for state visibility (PV, SoC, grid, charge limits, daily totals, etc.) |
-| `automations/` | Automations for inverter mode switching, scheduled charging, export behaviour, state decision logic |
-| `helpers/` | Input helpers used to store state, flags, thresholds and configuration values |
-| `lovelace/` *(optional)* | Dashboard cards for monitoring battery, PV, grid flow & system mode |
-
-These YAML files are meant to be **reference patterns**, not “plug and play”.  
-Entity names may need adjustment based on your system.
+> This framework is designed to be **predictable**, **explainable**, and **safe**, with clear separation of responsibilities across automations and scripts.
 
 ---
 
-## 🎯 What Problem This Solves
+## 🏗 Repository Structure
 
-The SolaX integration exposes **raw inverter controls**, but does not provide:
+| Path            | Purpose |
+|-----------------|---------|
+| `automations/`  | All DAI/RBC automations (one job per automation; UI-editor safe) |
+| `scripts/`      | Reusable script blocks (e.g., bias update, mapper calls, mode writes) |
+| `sensors/`      | Template/derived sensors used by planners and learners |
+| `helpers/`      | Helper definitions (IDs/names list, not config.yaml blobs) |
+| `dashboards/`   | Optional Lovelace cards (planning status, RBC visuals, trace aids) |
+| `docs/`         | Design notes, governance rules, helper maps, diagrams |
 
-- Strategy logic
-- Charge target scheduling
-- Export vs self-use decisioning
-- Day-ahead planning
-- Override layers
-
-This repository provides **automation structures** that make the inverter:
-- Smarter
-- More predictable
-- More energy-cost-aware
+> Entity IDs will likely differ in your setup. Search/replace carefully and test in a non-critical window.
 
 ---
 
-## ⚙️ Requirements
+## ✅ Prerequisites
 
-To use / adapt the YAML here, you should already:
-- Have SolaX shown in Home Assistant (via built-in integration, MQTT bridge, or local API)
-- Be comfortable editing YAML in HA
-- Understand how helpers, triggers, and conditions work
-- Be familiar with **one automation = one responsibility** pattern (recommended)
-
-If any of these are unfamiliar, start with:
-https://www.home-assistant.io/docs/automation/
-
----
-
-## 🔍 Before You Import Anything
-
-You will need to:
-1. Search for `solax_` entity names that differ in your setup
-2. Create any referenced **input numbers**, **input booleans**, or **scenes**
-3. Test in a **non-critical time window** before relying on automation
-
-This avoids unintended inverter behaviour.
+- **Home Assistant** (recent core; UI automation editor in use)
+- **SolaX** inverter entities available in HA (native integration / MQTT / local API)
+- **Octopus Energy** (or similar ToU tariff) if you want charge planning
+- Comfort with:
+  - Creating **helpers** (input_number / input_boolean / input_text / input_select)
+  - Importing YAML automations via the **UI editor** or splitting packages
+  - Reviewing **Automation Traces** and **Logbook**
 
 ---
 
-## 📊 Optional: Recommended Dashboard Cards
+## 🔑 Core Design Principles
 
-A simple battery + solar usage overview works well:
-- **Energy Dashboard**
-- **Power Flow Card / Power Flow Plus**
-- **ApexCharts for historical SoC vs solar**
-
-If you want, I can include ready-made dashboard cards — just open an Issue.
+- **One automation = one responsibility** (orchestrators call scripts; scripts do work)
+- **Helpers as shared state** (explicit reads/writes; no silent side-effects)
+- **Scenes/flags as control layers** to avoid automations fighting each other
+- **Master-only inverter writes** (single authority to the inverter write path)
+- **UI-editor-safe YAML** (no anchors/includes; clear `trigger/condition/action`)
+- **Idempotent, confirm-and-dwell writes** to prevent flapping
 
 ---
 
-## 💬 Support / Questions / Sharing
+## 🛡️ Safety & Governance Summary
 
-If you adapt or improve this setup:
-- Please open an **Issue**
-- Or submit a **Pull Request**
+- Writes are **guarded** (time windows, tariff pairing, SoC and mode checks).
+- Every write path logs to **Logbook** for auditability.
+- Automations include **trigger IDs** and **default branches**.
+- Restart-safe: scheduled **safety nets** (e.g., 23:40/23:55 bias/mapper stamps).
+- Bias flow uses a **single, shared mapper** (Bias → % suggestion) for consistency.
 
-Sharing improvements strengthens the entire HA + SolaX ecosystem.
+> You still **must** validate against your hardware and tariff. Start conservative.
+
+---
+
+## 🚀 Getting Started (minimal path)
+
+1. **Clone** this repo and open in VS Code (via GitHub Desktop is fine).
+2. In HA, **create the referenced helpers** shown in `helpers/HELPERS_MAP.md`.
+3. Import automations **one by one**, starting with:
+   - RBC bias producers (Daily, Evening)
+   - Bias→% mapper
+   - DAI planners (Grid-Charge Planner, Evening Buffer)
+4. Adjust entity IDs (battery SoC, inverter mode entities, tariff select, etc.).
+5. Test in a **harmless window** (no overnight charge yet). Review trace/logs.
+6. Enable grid-charge writes last, after dry-run validation.
+
+---
+
+## 📊 Dashboards (optional)
+
+The `dashboards/` folder includes example cards for:
+- **Planning status** (planned vs adjusted energy)
+- **Bias traces** (Daily PV, Daily Demand, Evening 16–22)
+- **Charge windows** and **resulting inverter commands**
+
+Import these after the core automations are stable.
+
+---
+
+## 🧪 Troubleshooting Tips
+
+- If an expected write doesn’t happen, check:
+  - The **mode/scene flag** isn’t blocking
+  - The **helper map** (which automation “owns” a write)
+  - **Tariff pairing/desync** rules (Cosy/Flux alignment)
+  - The **safety net** ran (23:40/23:55) and stamped bias/percent
+- Use **Automation Trace** + **Logbook** together for root-cause.
+
+---
+
+## 🤝 Contributing / Issues
+
+- Open an **Issue** for questions or adaptation help (other inverters, tariffs)
+- PRs welcome for:
+  - New dashboards
+  - Additional learners (morning window, weekend profiles)
+  - Integrations with other tariff providers
 
 ---
 
 ## ⚠️ Disclaimer
 
-This configuration controls **real hardware**.  
-Applying incorrect charge limits or mode switching may affect battery health or energy billing.
-
-Make changes **intentionally** and test **incrementally**.
+This framework can **control real charging/discharging hardware**.  
+Improper configuration may affect battery health or billing.  
+Adopt conservatively, validate with traces, and roll out gradually.
 
 ---
 
+## 📜 License
+
+MIT (unless otherwise noted within files).
