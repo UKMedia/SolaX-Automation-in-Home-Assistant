@@ -1,135 +1,123 @@
 # SolaX-Automation-in-Home-Assistant
 
-# ⚡ Home Assistant — DAI / RBC Energy Automation Framework (SolaX)
+# ⚡ Home Assistant – DAI / RBC Coordination Framework (SolaX & Octopus Energy)
 
-This repository contains my **DAI (Dynamic AI-driven Inverter control)** and **RBC (Robust Bias Correction)** automations, scripts, helpers, and supporting YAML for **SolaX Hybrid inverter** systems running under **Home Assistant**.
+This repository contains the **DAI (Dynamic AI-driven Inverter control)** and **RBC (Robust Bias Correction)** framework I use to coordinate a **SolaX Hybrid inverter** system under **Octopus Energy** tariffs. It focuses on *how to run a multi-automation energy stack safely and predictably* — where planning, learning, and inverter control all interact.
 
-It is intended for **medium-level HA users** who want a **coherent, scalable energy-automation architecture** that goes beyond one-off automations: day-ahead planning, safe inverter control, and bias-learning loops that adapt to real usage and PV.
+- **Site context**
+  - Parallel SolaX installation: **2 × X1 Gen4 Hybrid** inverters
+  - **23 kWh** total battery storage
+  - **Fully electric house with ASHP** (air-source heat pump)
+  - Octopus **Flux** (export-centric) and **Cosy** (time-of-use) tariff support
+  - Automatic handling for **Free Energy** and **Energy Saving** sessions
 
----
-
-## 🧭 What DAI / RBC Does (at a glance)
-
-- **DAI — Planning & Control**
-  - Day-ahead **grid-charge planning** (respecting tariff windows)
-  - **Mode orchestration** (Self-Use, Charge, Force-Discharge) with safety guards
-  - **Evening Buffer** logic to ensure evening supply without surprise imports
-  - Idempotent writes with confirmation/dwell and restart-safe behaviour
-
-- **RBC — Learning & Stability**
-  - Bias learning for **PV Daily**, **Demand Daily**, and **Evening (16–22)** windows
-  - “Safety-first” adjusted forecasts to prevent under-charging events
-  - Upward-only same-day adjustment and daily lock points
-  - Consistent mapper pipeline (Bias → Percent suggestions)
-
-> This framework is designed to be **predictable**, **explainable**, and **safe**, with clear separation of responsibilities across automations and scripts.
+> This repo is about **architecture and coordination**. Device/entity names will differ in your setup.
 
 ---
 
-## 🏗 Repository Structure
+## 🎯 Goals of the Integration
 
-| Path            | Purpose |
-|-----------------|---------|
-| `automations/`  | All DAI/RBC automations (one job per automation; UI-editor safe) |
-| `scripts/`      | Reusable script blocks (e.g., bias update, mapper calls, mode writes) |
-| `sensors/`      | Template/derived sensors used by planners and learners |
-| `helpers/`      | Helper definitions (IDs/names list, not config.yaml blobs) |
-| `dashboards/`   | Optional Lovelace cards (planning status, RBC visuals, trace aids) |
-| `docs/`         | Design notes, governance rules, helper maps, diagrams |
-
-> Entity IDs will likely differ in your setup. Search/replace carefully and test in a non-critical window.
+- **Minimise Grid Import**
+- **Minimise PV Clipping** (avoid throwing away solar at mid-day)
+- **Maximise Export Revenue** (especially on Flux)
+- **Auto-correct forecast error** via **RBC bias** so estimates track reality over time
+- **Automatically support** Octopus **Free Energy** and **Energy Saving** sessions
 
 ---
 
-## ✅ Prerequisites
+## 🧠 DAI vs RBC — Who does what?
 
-- **Home Assistant** (recent core; UI automation editor in use)
-- **SolaX** inverter entities available in HA (native integration / MQTT / local API)
-- **Octopus Energy** (or similar ToU tariff) if you want charge planning
-- Comfort with:
-  - Creating **helpers** (input_number / input_boolean / input_text / input_select)
-  - Importing YAML automations via the **UI editor** or splitting packages
-  - Reviewing **Automation Traces** and **Logbook**
+| Layer | Responsibility | Output | Writes to Inverter? |
+|------|-----------------|--------|---------------------|
+| **RBC** | Learns how reality differs from forecasts (kWh / °C) and adjusts expectations | Bias & Adjusted values | **No** |
+| **DAI** | Uses Adjusted values to plan charge targets, evening buffer %, and mode decisions | Safe, timed actions | **Yes — Master-only** |
 
----
+- **RBC = learn & stabilise.**  
+- **DAI = plan & act.**
 
-## 🔑 Core Design Principles
-
-- **One automation = one responsibility** (orchestrators call scripts; scripts do work)
-- **Helpers as shared state** (explicit reads/writes; no silent side-effects)
-- **Scenes/flags as control layers** to avoid automations fighting each other
-- **Master-only inverter writes** (single authority to the inverter write path)
-- **UI-editor-safe YAML** (no anchors/includes; clear `trigger/condition/action`)
-- **Idempotent, confirm-and-dwell writes** to prevent flapping
+All inverter control commands are **idempotent**, **dwell-protected**, and sent to the **Master** inverter only (`solax_house_*`). The second inverter is **telemetry-only** for reads.
 
 ---
 
-## 🛡️ Safety & Governance Summary
+## 🌡️ Why ASHP Matters (Seasonality)
 
-- Writes are **guarded** (time windows, tariff pairing, SoC and mode checks).
-- Every write path logs to **Logbook** for auditability.
-- Automations include **trigger IDs** and **default branches**.
-- Restart-safe: scheduled **safety nets** (e.g., 23:40/23:55 bias/mapper stamps).
-- Bias flow uses a **single, shared mapper** (Bias → % suggestion) for consistency.
-
-> You still **must** validate against your hardware and tariff. Start conservative.
+With a **fully electric house and ASHP**, winter demand can be **significantly higher** and more volatile than summer. To avoid under-charging on cold days, the framework includes an **RBC Minimum Temperature** learning domain that corrects the **forecast minimum temperature** toward **actual** overnight lows. This adjusted min-temp feeds a **Cold Day** classifier used by the DAI Grid-Charge Planner, so the system carries more energy into colder mornings *without guesswork*. (Terminology aligns with the High Level Design v1.2.) :contentReference[oaicite:1]{index=1}
 
 ---
 
-## 🚀 Getting Started (minimal path)
+## 🔁 RBC Learning Domains (aligned to HLD v1.2)
 
-1. **Clone** this repo and open in VS Code (via GitHub Desktop is fine).
-2. In HA, **create the referenced helpers** shown in `helpers/HELPERS_MAP.md`.
-3. Import automations **one by one**, starting with:
-   - RBC bias producers (Daily, Evening)
-   - Bias→% mapper
-   - DAI planners (Grid-Charge Planner, Evening Buffer)
-4. Adjust entity IDs (battery SoC, inverter mode entities, tariff select, etc.).
-5. Test in a **harmless window** (no overnight charge yet). Review trace/logs.
-6. Enable grid-charge writes last, after dry-run validation.
+All RBC families use the same **canonical** bias pattern (producer → safety net → adjusted updater/mapper → watchdog). :contentReference[oaicite:2]{index=2}
 
----
+| RBC Domain | Learns Bias In… | Stores | Consumed By |
+|-----------|------------------|--------|-------------|
+| **PV Daily** | Solar generation (kWh) | `input_number.rbc_bias_pv_daily` | DAI solar planning |
+| **Demand Daily** *(reference pattern)* | Whole-day usage (kWh) | `input_number.rbc_bias_demand_daily` | DAI grid-charge planning |
+| **Evening Window (16–22)** | Evening consumption (kWh) → **% mapper** | `input_number.rbc_evening_bias_kwh` | DAI Evening Buffer controller |
+| **Minimum Temperature** | Forecast vs actual overnight low (°C) | `input_number.rbc_temp_bias_c` | DAI Cold-Day classification → planning |
 
-## 📊 Dashboards (optional)
-
-The `dashboards/` folder includes example cards for:
-- **Planning status** (planned vs adjusted energy)
-- **Bias traces** (Daily PV, Daily Demand, Evening 16–22)
-- **Charge windows** and **resulting inverter commands**
-
-Import these after the core automations are stable.
+**Octopus sessions:** Free-Energy / Energy-Saving events are surfaced to DAI as **planning constraints/windows**. DAI adjusts targets, avoids clashes, and prioritises cheap/free import or curtailed export as appropriate.
 
 ---
 
-## 🧪 Troubleshooting Tips
+## 🔧 DAI Planning & Control
 
-- If an expected write doesn’t happen, check:
-  - The **mode/scene flag** isn’t blocking
-  - The **helper map** (which automation “owns” a write)
-  - **Tariff pairing/desync** rules (Cosy/Flux alignment)
-  - The **safety net** ran (23:40/23:55) and stamped bias/percent
-- Use **Automation Trace** + **Logbook** together for root-cause.
+DAI uses RBC **Adjusted** values + tariff windows to:
+- Decide **whether/how much** to charge overnight (Cosy) or time windows
+- Maintain an **Evening Buffer %** so early evening doesn’t hit the grid
+- Balance **PV clipping mitigation** by raising midday consumption/charging when surplus is likely
+- Optimise **Flux** export moments without starving the evening
 
----
-
-## 🤝 Contributing / Issues
-
-- Open an **Issue** for questions or adaptation help (other inverters, tariffs)
-- PRs welcome for:
-  - New dashboards
-  - Additional learners (morning window, weekend profiles)
-  - Integrations with other tariff providers
+All actions log to the **Logbook** and are traceable in **Automation Traces**.
 
 ---
 
-## ⚠️ Disclaimer
+## 📂 Repository Layout
 
-This framework can **control real charging/discharging hardware**.  
-Improper configuration may affect battery health or billing.  
-Adopt conservatively, validate with traces, and roll out gradually.
+| Path | Contents | Purpose |
+|------|----------|---------|
+| `automations/` | Planners, bias producers, safety nets, orchestrators, watchdogs | Controls when things happen |
+| `scripts/` | Shared compute/mapping routines (e.g., Bias→%) | Keeps logic consistent & reusable |
+| `sensors/` | Derived/statistics sensors (Demand, PV, Min Temp) | Make state and extremes visible |
+| `helpers/` | Required input helpers (numbers/booleans/text) | Persist learned/planned state |
+| `dashboards/` | Optional Lovelace cards | See what the system is thinking |
+| `docs/` | Prompt Library, Governance Checklist, Workflow Diagram | Maintainability & onboarding |
 
 ---
 
-## 📜 License
+## ✅ Getting Started (practical)
 
-MIT (unless otherwise noted within files).
+1. **Create helpers** listed in `helpers/HELPERS_MAP.md`.
+2. Import automations in this sequence:
+   1) RBC Bias Producers (Daily Demand, PV Daily, Evening, **Min Temp**)  
+   2) RBC Safety Nets (+15 min)  
+   3) **Evening Bias → Percent Mapper**  
+   4) RBC Watchdog (23:59 audit)  
+   5) DAI Grid-Charge Planner (Cosy/Flux aware)  
+   6) DAI Evening Buffer Controller
+3. Run in **“no inverter writes”** mode first; validate traces & logbook.
+4. Enable write actions **last** (Master inverter only).
+
+---
+
+## 🧭 Why this stays stable at scale
+
+- **One automation = one responsibility**
+- **Helpers store state** (no hidden/inferred state)
+- Shared **Bias engine** across all RBC domains for consistent behaviour
+- **Guard rails** on every write (windows, SoC, tariff pairing, idempotence)
+- **Master-only** inverter writes to prevent race conditions
+
+---
+
+## ⚠️ Notes & Safety
+
+- Start conservatively; validate over several days.
+- Don’t place your HA config/repo inside **OneDrive/iCloud/Dropbox** sync folders.
+- Test Octopus session handling on a mild day before relying on it during extremes.
+
+---
+
+## 📝 License
+
+MIT — contributions welcome if you have improvements, dashboards, or alternative heuristics that play nicely with this structure.
