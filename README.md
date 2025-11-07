@@ -1,0 +1,1 @@
+# SolaX-Automation-in-Home-Assistant
