@@ -104,7 +104,7 @@ All actions are logged and traceable through HA Traces and the Logbook.
 
 ## 🧩 Helpers & Entities Reference Map
 
-**File:** [`helper and Entity List.md`](helper and Entity List.md)  
+**File:** [`Helper and Entity List.md`](Helper and Entity List.md)  
 **Scope:** DAI + RBC Home Assistant Integration (Brenchley System)
 
 This file provides the authoritative mapping between:
