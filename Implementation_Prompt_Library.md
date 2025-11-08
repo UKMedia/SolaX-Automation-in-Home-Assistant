@@ -1,10 +1,5 @@
 # 🧰 Implementation Prompt Library
 
-Each prompt below can live as a **separate file** inside your `/prompts/` folder  
-(e.g. `/prompts/01_extract_entities.md`, `/prompts/02_compare_yamls.md`, etc.).  
-Alternatively, you can keep this as a **single combined library file** if you prefer to manage them in one place.  
-Each section begins with a clear `##` heading so you can easily split them later if needed.
-
 All prompts are designed for **Home Assistant–experienced users** who are new to prompt-based code generation.  
 Outputs are structured as CSV, JSON, or Markdown tables — no commentary — so they can drop directly into spreadsheets or docs.
 
