@@ -1,123 +1,141 @@
-# SolaX-Automation-in-Home-Assistant
-
 # ⚡ Home Assistant – DAI / RBC Coordination Framework (SolaX & Octopus Energy)
 
-This repository contains the **DAI (Dynamic AI-driven Inverter control)** and **RBC (Robust Bias Correction)** framework I use to coordinate a **SolaX Hybrid inverter** system under **Octopus Energy** tariffs. It focuses on *how to run a multi-automation energy stack safely and predictably* — where planning, learning, and inverter control all interact.
+This repository contains the **DAI (Dynamic AI-driven Inverter control)** and **RBC (Robust Bias Correction)** framework I use to coordinate a **SolaX Hybrid inverter** system under **Octopus Energy** tariffs.  
+It focuses on *how to run a multi-automation energy stack safely and predictably* — where **planning**, **learning**, and **inverter control** all interact.
 
-- **Site context**
-  - Parallel SolaX installation: **2 × X1 Gen4 Hybrid** inverters
-  - **23 kWh** total battery storage
-  - **Fully electric house with ASHP** (air-source heat pump)
-  - Octopus **Flux** (export-centric) and **Cosy** (time-of-use) tariff support
-  - Automatic handling for **Free Energy** and **Energy Saving** sessions
+> This repository is a **reference implementation**.  
+> Your entity names and helper IDs will differ; adapt them using the included templates and ChatGPT prompts.
 
-> This repo is about **architecture and coordination**. Device/entity names will differ in your setup.
+---
+
+## 📦 Reference Implementation Scope
+This project is released as a **Reference Implementation + Assisted Rebuilder** rather than a turnkey package.
+
+| Component | Purpose |
+|------------|----------|
+| **YAML code** | Working DAI + RBC automations/scripts as reference |
+| **Design docs** | High-Level Design + Quick Start summaries |
+| **Templates** | `entity_mapping_template.md` and `helper_manifest.md` |
+| **Prompt Library** | ChatGPT prompts to regenerate, compare, and verify YAML |
+| **Blueprints (optional)** | Planned later for the stable RBC kernel only |
+
+Users adapt locally by completing the mapping templates and running the **Regenerator Prompt**.  
+This avoids hard-coded entity names while keeping every configuration safe and self-auditing.
+
+---
+
+## ✅ Getting Started
+1. **Complete** the templates:  
+   `templates/entity_mapping_template.md` and `templates/helper_manifest.md`.  
+2. **Use** the **Implementation Prompt Library** in `/prompts/` to:  
+   - Extract entities from your YAML  
+   - Verify helper alignment  
+   - Regenerate code for your setup  
+3. **Import automations** in this sequence:  
+   - RBC Bias Producers → Safety Nets → Mapper → Watchdog → DAI Planners → DAI Buffer Controller  
+4. Run through **Monitor-only → Dry-Run → Live Writes (Master only)**.  
+5. Validate with the acceptance-test prompts before enabling inverter writes.
 
 ---
 
 ## 🎯 Goals of the Integration
-
-- **Minimise Grid Import**
-- **Minimise PV Clipping** (avoid throwing away solar at mid-day)
-- **Maximise Export Revenue** (especially on Flux)
-- **Auto-correct forecast error** via **RBC bias** so estimates track reality over time
-- **Automatically support** Octopus **Free Energy** and **Energy Saving** sessions
+- Minimise **Grid Import**  
+- Minimise **PV Clipping** (avoid throwing away solar mid-day)  
+- Maximise **Export Revenue** (especially on Flux)  
+- **Auto-correct forecast error** via RBC bias learning  
+- Seamlessly support Octopus **Free Energy** and **Energy Saving** sessions  
 
 ---
 
-## 🧠 DAI vs RBC — Who does what?
+## 🧠 DAI vs RBC — Who Does What?
 
 | Layer | Responsibility | Output | Writes to Inverter? |
-|------|-----------------|--------|---------------------|
-| **RBC** | Learns how reality differs from forecasts (kWh / °C) and adjusts expectations | Bias & Adjusted values | **No** |
-| **DAI** | Uses Adjusted values to plan charge targets, evening buffer %, and mode decisions | Safe, timed actions | **Yes — Master-only** |
+|-------|----------------|---------|---------------------|
+| **RBC** | Learns how reality differs from forecasts (kWh / °C) | Bias & Adjusted values | **No** |
+| **DAI** | Uses Adjusted values to plan charge targets and mode decisions | Safe, timed actions | **Yes – Master only** |
 
-- **RBC = learn & stabilise.**  
-- **DAI = plan & act.**
+- **RBC = learn & stabilise**  
+- **DAI = plan & act**
 
-All inverter control commands are **idempotent**, **dwell-protected**, and sent to the **Master** inverter only (`solax_house_*`). The second inverter is **telemetry-only** for reads.
+All inverter commands are **idempotent**, **dwell-protected**, and written only to the **Master inverter** (`solax_house_*`).  
+The second inverter is **telemetry-only**.
+
+---
+
+## 🏠 Site Context
+- Parallel SolaX installation: **2 × X1 Gen4 Hybrid** inverters  
+- **≈ 23 kWh battery storage**  
+- **Fully electric home with ASHP** (Air-Source Heat Pump)  
+- Octopus **Flux** (export-centric) and **Cosy** (time-of-use) tariff support  
+- Automatic handling for **Free Energy** and **Energy Saving** sessions  
 
 ---
 
 ## 🌡️ Why ASHP Matters (Seasonality)
-
-With a **fully electric house and ASHP**, winter demand can be **significantly higher** and more volatile than summer. To avoid under-charging on cold days, the framework includes an **RBC Minimum Temperature** learning domain that corrects the **forecast minimum temperature** toward **actual** overnight lows. This adjusted min-temp feeds a **Cold Day** classifier used by the DAI Grid-Charge Planner, so the system carries more energy into colder mornings *without guesswork*. (Terminology aligns with the High Level Design v1.2.) :contentReference[oaicite:1]{index=1}
+With a fully electric ASHP house, winter demand is far higher and more volatile.  
+The framework’s **RBC Minimum Temperature** domain learns forecast vs actual overnight lows to drive a **Cold-Day flag** used by the DAI Grid-Charge Planner, ensuring extra energy is carried into cold mornings automatically (HLD v1.2 alignment).
 
 ---
 
-## 🔁 RBC Learning Domains (aligned to HLD v1.2)
+## 🔁 RBC Learning Domains
+All RBC domains share the same canonical bias pattern *(producer → safety net → mapper → watchdog)*.
 
-All RBC families use the same **canonical** bias pattern (producer → safety net → adjusted updater/mapper → watchdog). :contentReference[oaicite:2]{index=2}
-
-| RBC Domain | Learns Bias In… | Stores | Consumed By |
-|-----------|------------------|--------|-------------|
-| **PV Daily** | Solar generation (kWh) | `input_number.rbc_bias_pv_daily` | DAI solar planning |
-| **Demand Daily** *(reference pattern)* | Whole-day usage (kWh) | `input_number.rbc_bias_demand_daily` | DAI grid-charge planning |
-| **Evening Window (16–22)** | Evening consumption (kWh) → **% mapper** | `input_number.rbc_evening_bias_kwh` | DAI Evening Buffer controller |
-| **Minimum Temperature** | Forecast vs actual overnight low (°C) | `input_number.rbc_temp_bias_c` | DAI Cold-Day classification → planning |
-
-**Octopus sessions:** Free-Energy / Energy-Saving events are surfaced to DAI as **planning constraints/windows**. DAI adjusts targets, avoids clashes, and prioritises cheap/free import or curtailed export as appropriate.
+| Domain | Learns Bias In | Stores Result | Used By |
+|---------|----------------|----------------|---------|
+| **PV Daily** | Solar generation (kWh) | `input_number.rbc_bias_pv_daily` | DAI solar planner |
+| **Demand Daily** | Whole-day usage (kWh) | `input_number.rbc_bias_demand_daily` | DAI grid-charge planner |
+| **Evening 16-22** | Evening use (kWh → %) | `input_number.rbc_evening_bias_kwh` | DAI Evening Buffer |
+| **Minimum Temp** | Forecast vs actual (°C) | `input_number.rbc_temp_bias_c` | DAI Cold-Day logic |
 
 ---
 
 ## 🔧 DAI Planning & Control
+DAI combines RBC Adjusted values with tariff windows to plan:
+- Overnight charging (Cosy) or timed windows (Flux)  
+- **Evening Buffer %** so early evening stays off-grid  
+- **PV clip mitigation** via mid-day charging  
+- **Flux export optimisation** without evening shortfall  
 
-DAI uses RBC **Adjusted** values + tariff windows to:
-- Decide **whether/how much** to charge overnight (Cosy) or time windows
-- Maintain an **Evening Buffer %** so early evening doesn’t hit the grid
-- Balance **PV clipping mitigation** by raising midday consumption/charging when surplus is likely
-- Optimise **Flux** export moments without starving the evening
-
-All actions log to the **Logbook** and are traceable in **Automation Traces**.
-
----
-
-## 📂 Repository Layout
-
-| Path | Contents | Purpose |
-|------|----------|---------|
-| `automations/` | Planners, bias producers, safety nets, orchestrators, watchdogs | Controls when things happen |
-| `scripts/` | Shared compute/mapping routines (e.g., Bias→%) | Keeps logic consistent & reusable |
-| `sensors/` | Derived/statistics sensors (Demand, PV, Min Temp) | Make state and extremes visible |
-| `helpers/` | Required input helpers (numbers/booleans/text) | Persist learned/planned state |
-| `dashboards/` | Optional Lovelace cards | See what the system is thinking |
-| `docs/` | Prompt Library, Governance Checklist, Workflow Diagram | Maintainability & onboarding |
+All actions are logged and traceable through HA Traces and the Logbook.
 
 ---
 
-## ✅ Getting Started (practical)
-
-1. **Create helpers** listed in `helpers/HELPERS_MAP.md`.
-2. Import automations in this sequence:
-   1) RBC Bias Producers (Daily Demand, PV Daily, Evening, **Min Temp**)  
-   2) RBC Safety Nets (+15 min)  
-   3) **Evening Bias → Percent Mapper**  
-   4) RBC Watchdog (23:59 audit)  
-   5) DAI Grid-Charge Planner (Cosy/Flux aware)  
-   6) DAI Evening Buffer Controller
-3. Run in **“no inverter writes”** mode first; validate traces & logbook.
-4. Enable write actions **last** (Master inverter only).
+## 🧭 Design Principles
+- **One automation = one responsibility**  
+- **Helpers store state** (no hidden logic)  
+- **Shared Bias engine** across RBC domains  
+- **Strong guard-rails** on every write (window, SoC, tariff pairing, idempotence)  
+- **Master-only writes** prevent race conditions  
 
 ---
 
-## 🧭 Why this stays stable at scale
-
-- **One automation = one responsibility**
-- **Helpers store state** (no hidden/inferred state)
-- Shared **Bias engine** across all RBC domains for consistent behaviour
-- **Guard rails** on every write (windows, SoC, tariff pairing, idempotence)
-- **Master-only** inverter writes to prevent race conditions
-
----
-
-## ⚠️ Notes & Safety
-
-- Start conservatively; validate over several days.
-- Don’t place your HA config/repo inside **OneDrive/iCloud/Dropbox** sync folders.
-- Test Octopus session handling on a mild day before relying on it during extremes.
+## ⚠️ Safety & Support
+- Validate over several days before live writes.  
+- Keep HA config outside cloud-sync folders (OneDrive, iCloud, Dropbox).  
+- Use acceptance-test prompts before enabling inverter writes.  
+- Community support only – issues and PRs welcome.
 
 ---
 
 ## 📝 License
+MIT License • Use at your own risk • Credit welcome if you fork or extend.
 
-MIT — contributions welcome if you have improvements, dashboards, or alternative heuristics that play nicely with this structure.
+---
+
+# 🧰 Implementation Prompt Library (`/prompts/`)
+
+| File | Purpose |
+|------|----------|
+| **01_extract_entities.md** | Parse YAML and output all referenced entities/helpers (CSV or JSON). |
+| **02_compare_yamls.md** | Behavioural diff report between reference and user-generated YAML. |
+| **03_regenerator.md** | Generate compliant YAML from design + entity/helper maps. |
+| **04_helper_auditor.md** | Check helper presence and unit/min/max/step vs manifest. |
+| **05_preflight_planner.md** | Run dry-run SoC planning without inverter writes. |
+| **06_acceptance_tests.md** | Auto-generate “Trigger → Expected Outcome” acceptance cases. |
+| **07_entity_map_builder.md** | Build an entity-map CSV directly from pasted YAML. |
+| **08_risk_review.md** | Identify potential grid import/export risks and suggest guards. |
+| **09_doc_sync_snippet.md** | Draft Design Notes for repo documentation. |
+
+Each file contains a complete ChatGPT prompt — copy, paste, run.  
+All prompts are designed for HA users who know YAML but are new to ChatGPT.  
+Outputs are structured for quick import into spreadsheets or docs.
