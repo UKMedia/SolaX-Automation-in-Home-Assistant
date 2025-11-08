@@ -6,6 +6,8 @@ It focuses on *how to run a multi-automation energy stack safely and predictably
 > This repository is a **reference implementation**.  
 > Your entity names and helper IDs will differ; adapt them using the included templates and ChatGPT prompts.
 
+Please refer to the Docs section for Installation instructions
+
 ---
 
 ## 📦 Reference Implementation Scope
