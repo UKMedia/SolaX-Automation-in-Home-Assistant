@@ -1,0 +1,119 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: RBC – Adjusted Demand Daily Updater v2.2 (Plan-live, lock-at-23:59) (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – RBC Adjusted Demand Daily Updater v2.2 (Plan-live, lock-at-23:59)
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v2.2 splits behaviour: LIVE
+  (00:00–23:58) keeps Adjusted as a planning target (max(Estimate+Bias,
+  PrevAdjusted)) and ignores Actual; EOD (23:59) locks Adjusted =
+  max(Estimate+Bias, Actual_final). Keeps deadband, numeric safety, and
+  clamping. Visual-Editor-safe.
+triggers:
+  - id: t_midnight
+    trigger: time
+    at: "00:00:00"
+  - id: t_eod_2359
+    trigger: time
+    at: "23:59:00"
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+  - id: t_estimate_change
+    trigger: state
+    entity_id: input_number.dai_expected_usage_daily_kwh
+  - id: t_bias_change
+    trigger: state
+    entity_id: input_number.rbc_bias_demand_daily
+  - id: t_actual_change
+    trigger: state
+    entity_id: sensor.brenchley_total_load_today_kwh
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_midnight
+        sequence:
+          - action: logbook.log
+            data:
+              name: RBC — Adjusted Demand (Daily)
+              message: "New day: midnight initialisation."
+              entity_id: input_number.rbc_adjusted_demand_daily_kwh
+      - conditions:
+          - condition: trigger
+            id: t_eod_2359
+        sequence:
+          - action: logbook.log
+            data:
+              name: RBC — Adjusted Demand (Daily)
+              message: "23:59 snapshot: end-of-day lock-in."
+              entity_id: input_number.rbc_adjusted_demand_daily_kwh
+    default: []
+  - variables:
+      est: "{{ states('input_number.dai_expected_usage_daily_kwh') | float(0) }}"
+      bias: "{{ states('input_number.rbc_bias_demand_daily') | float(0) }}"
+      actual_raw: "{{ states('sensor.brenchley_total_load_today_kwh') }}"
+      actual: >
+        {{ actual_raw | float(0) if actual_raw not in
+        ['unknown','unavailable','none',''] else 0.0 }}
+      planned_unclamped: "{{ (est | float(0)) + (bias | float(0)) }}"
+      planned: >
+        {% set r = planned_unclamped | float(0) %} {% if r < 0 %}0{% elif r >
+        max_kwh %}{{ max_kwh }}{% else %}{{ r }}{% endif %}
+      prev_adj: "{{ states('input_number.rbc_adjusted_demand_daily_kwh') | float(0) }}"
+      deadband: 0.01
+      is_eod: "{{ now().strftime('%H:%M') == '23:59' }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ is_eod }}"
+        sequence:
+          - variables:
+              target_val: "{{ [planned | float(0), actual | float(0)] | max }}"
+              delta: "{{ (target_val | float(0)) - (prev_adj | float(0)) }}"
+              need_write: "{{ (delta | float(0) | abs) > (deadband | float(0)) }}"
+          - condition: template
+            value_template: "{{ need_write }}"
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.rbc_adjusted_demand_daily_kwh
+            data:
+              value: "{{ target_val | float(0) | round(2) }}"
+          - action: logbook.log
+            data:
+              name: RBC — Adjusted Demand (Daily)
+              message: >-
+                {{ now().strftime('%Y-%m-%d %H:%M:%S') }} — EOD lock → Adjusted
+                = max(Planned={{ planned | round(2) }}, Actual={{ actual |
+                round(2) }}) = {{ target_val | round(2) }} kWh (prev {{ prev_adj
+                | round(2) }}, Δ={{ delta | round(2) }}).
+              entity_id: input_number.rbc_adjusted_demand_daily_kwh
+      - conditions:
+          - condition: template
+            value_template: "{{ not is_eod }}"
+        sequence:
+          - variables:
+              target_val: "{{ [planned | float(0), prev_adj | float(0)] | max }}"
+              delta: "{{ (target_val | float(0)) - (prev_adj | float(0)) }}"
+              need_write: "{{ (delta | float(0) | abs) > (deadband | float(0)) }}"
+          - condition: template
+            value_template: "{{ need_write }}"
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.rbc_adjusted_demand_daily_kwh
+            data:
+              value: "{{ target_val | float(0) | round(2) }}"
+          - action: logbook.log
+            data:
+              name: RBC — Adjusted Demand (Daily)
+              message: >-
+                {{ trigger.id | default('manual') }} — LIVE plan → Adjusted =
+                max(Planned={{ planned | round(2) }}, PrevAdjusted={{ prev_adj |
+                round(2) }}) = {{ target_val | round(2) }} kWh (Δ={{ delta |
+                round(2) }}).
+              entity_id: input_number.rbc_adjusted_demand_daily_kwh
+    default: []
+mode: single
+variables:
+  max_kwh: 120

@@ -1,0 +1,210 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI – RBC Adjusted Next Horizon Demand v5.3.9 (Home Assistant automation)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – RBC Adjusted Next Horizon Demand v5.3.9
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v5.3.9 (PARAM-ONLY) Log
+  message correction only: now prints horizon-period demand, PV, and net values.
+  No logic or behaviour changes from v5.3.8. Design Reference: DAI + RBC
+  Framework v5.85 (Oct 2025). Change History: v5.3.9 (log text only); v5.3.8
+  (CR010 conditional logging restore + PV fraction logic); v5.3.7 (param-only
+  horizon + PV integration); v5.3.5 (trigger-only 15 min tick); v5.2 (CR005
+  conditional logging baseline).
+triggers:
+  - id: t_tick_15m
+    trigger: time_pattern
+    minutes: /15
+  - id: t_tick_1m
+    trigger: time_pattern
+    minutes: /1
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+  - id: t_tariff_change
+    trigger: state
+    entity_id: input_select.octopus_import_tariff
+  - id: t_demand_change
+    trigger: state
+    entity_id: input_number.rbc_adjusted_demand_daily_kwh
+  - id: t_pv_change
+    trigger: state
+    entity_id: input_number.rbc_adjusted_pv_daily_kwh
+  - id: t_cosy_time_changes
+    trigger: state
+    entity_id:
+      - input_datetime.dai_cosy_morning_start
+      - input_datetime.dai_cosy_morning_end
+      - input_datetime.dai_cosy_afternoon_start
+      - input_datetime.dai_cosy_afternoon_end
+      - input_datetime.dai_cosy_overnight_start
+      - input_datetime.dai_cosy_overnight_end
+  - id: t_flux_time_changes
+    trigger: state
+    entity_id:
+      - input_datetime.dai_flux_overnight_start
+      - input_datetime.dai_flux_overnight_end
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id:
+              - t_tick_15m
+              - t_tick_1m
+              - t_ha_start
+              - t_tariff_change
+              - t_demand_change
+              - t_pv_change
+              - t_cosy_time_changes
+              - t_flux_time_changes
+        sequence:
+          - variables:
+              ent_tariff: input_select.octopus_import_tariff
+              ent_log_target: input_text.rbc_horizon_log
+              adj_demand_daily: >-
+                {{ states('input_number.rbc_adjusted_demand_daily_kwh') |
+                float(0) }}
+              adj_pv_daily: >-
+                {{ states('input_number.rbc_adjusted_pv_daily_kwh') | float(0)
+                }}
+              prev_horizon: >-
+                {{ states('input_number.rbc_adjusted_demand_next_horizon_kwh') |
+                float(0) }}
+              cosy_morn_start_hm: >-
+                {{ states('input_datetime.dai_cosy_morning_start')[:5] if
+                states('input_datetime.dai_cosy_morning_start') not in
+                ['unknown','unavailable',''] else '00:00' }}
+              cosy_morn_end_hm: >-
+                {{ states('input_datetime.dai_cosy_morning_end')[:5] if
+                states('input_datetime.dai_cosy_morning_end') not in
+                ['unknown','unavailable',''] else '00:00' }}
+              cosy_aft_start_hm: >-
+                {{ states('input_datetime.dai_cosy_afternoon_start')[:5] if
+                states('input_datetime.dai_cosy_afternoon_start') not in
+                ['unknown','unavailable',''] else '00:00' }}
+              cosy_aft_end_hm: >-
+                {{ states('input_datetime.dai_cosy_afternoon_end')[:5] if
+                states('input_datetime.dai_cosy_afternoon_end') not in
+                ['unknown','unavailable',''] else '00:00' }}
+              cosy_night_start_hm: >-
+                {{ states('input_datetime.dai_cosy_overnight_start')[:5] if
+                states('input_datetime.dai_cosy_overnight_start') not in
+                ['unknown','unavailable',''] else '00:00' }}
+              cosy_night_end_hm: >-
+                {{ states('input_datetime.dai_cosy_overnight_end')[:5] if
+                states('input_datetime.dai_cosy_overnight_end') not in
+                ['unknown','unavailable',''] else '00:00' }}
+              flux_night_start_hm: >-
+                {{ states('input_datetime.dai_flux_overnight_start')[:5] if
+                states('input_datetime.dai_flux_overnight_start') not in
+                ['unknown','unavailable',''] else '00:00' }}
+              flux_night_end_hm: >-
+                {{ states('input_datetime.dai_flux_overnight_end')[:5] if
+                states('input_datetime.dai_flux_overnight_end') not in
+                ['unknown','unavailable',''] else '00:00' }}
+              now_hm: "{{ now().strftime('%H:%M') }}"
+              is_cosy: "{{ 'cosy' in states(ent_tariff) | lower }}"
+              is_flux: "{{ 'flux' in states(ent_tariff) | lower }}"
+              cosy_morn_enabled: >-
+                {{ not (cosy_morn_start_hm == '00:00' and cosy_morn_end_hm ==
+                '00:00') }}
+              cosy_aft_enabled: >-
+                {{ not (cosy_aft_start_hm == '00:00' and cosy_aft_end_hm ==
+                '00:00') }}
+              cosy_night_enabled: >-
+                {{ not (cosy_night_start_hm == '00:00' and cosy_night_end_hm ==
+                '00:00') }}
+              flux_night_enabled: >-
+                {{ not (flux_night_start_hm == '00:00' and flux_night_end_hm ==
+                '00:00') }}
+              in_cosy_morn: >-
+                {{ cosy_morn_enabled and (now_hm >= cosy_morn_start_hm) and
+                (now_hm < cosy_morn_end_hm) }}
+              in_cosy_aft: >-
+                {{ cosy_aft_enabled and (now_hm >= cosy_aft_start_hm) and
+                (now_hm < cosy_aft_end_hm) }}
+              in_cosy_night: >-
+                {{ cosy_night_enabled and (now_hm >= cosy_night_start_hm) and
+                (now_hm < cosy_night_end_hm) }}
+              in_flux_night: >-
+                {{ flux_night_enabled and (now_hm >= flux_night_start_hm) and
+                (now_hm < flux_night_end_hm) }}
+              next_start_hm: |-
+                {% if is_cosy %}
+                  {% if cosy_morn_enabled and (in_cosy_morn or now_hm < cosy_morn_start_hm) %}{{ cosy_morn_start_hm }}
+                  {% elif cosy_aft_enabled and (in_cosy_aft or now_hm < cosy_aft_start_hm) %}{{ cosy_aft_start_hm }}
+                  {% elif cosy_night_enabled and (in_cosy_night or now_hm < cosy_night_start_hm) %}{{ cosy_night_start_hm }}
+                  {% else %}{% if cosy_morn_enabled %}{{ cosy_morn_start_hm }}{% elif cosy_aft_enabled %}{{ cosy_aft_start_hm }}{% else %}{{ cosy_night_start_hm }}{% endif %}{% endif %}
+                {% else %}{{ flux_night_start_hm }}{% endif %}
+              next_end_hm: |-
+                {% if is_cosy %}
+                  {% if next_start_hm == cosy_morn_start_hm %}{{ cosy_morn_end_hm }}
+                  {% elif next_start_hm == cosy_aft_start_hm %}{{ cosy_aft_end_hm }}
+                  {% else %}{{ cosy_night_end_hm }}{% endif %}
+                {% else %}{{ flux_night_end_hm }}{% endif %}
+              following_start_hm: |-
+                {% if is_cosy %}
+                  {% if next_start_hm == cosy_morn_start_hm %}
+                    {% if cosy_aft_enabled %}{{ cosy_aft_start_hm }}
+                    {% elif cosy_night_enabled %}{{ cosy_night_start_hm }}
+                    {% else %}{{ cosy_morn_start_hm }}{% endif %}
+                  {% elif next_start_hm == cosy_aft_start_hm %}
+                    {% if cosy_night_enabled %}{{ cosy_night_start_hm }}
+                    {% elif cosy_morn_enabled %}{{ cosy_morn_start_hm }}
+                    {% else %}{{ cosy_aft_start_hm }}{% endif %}
+                  {% else %}
+                    {% if cosy_morn_enabled %}{{ cosy_morn_start_hm }}
+                    {% elif cosy_aft_enabled %}{{ cosy_aft_start_hm }}
+                    {% else %}{{ cosy_night_start_hm }}{% endif %}
+                  {% endif %}
+                {% else %}{{ flux_night_start_hm }}{% endif %}
+              next_end_min: >-
+                {{ (next_end_hm.split(':')[0] | int) * 60 +
+                (next_end_hm.split(':')[1] | int) }}
+              following_start_min: >-
+                {{ (following_start_hm.split(':')[0] | int) * 60 +
+                (following_start_hm.split(':')[1] | int) }}
+              horizon_minutes: "{{ (following_start_min - next_end_min) % 1440 }}"
+              horizon_fraction: "{{ (horizon_minutes / 1440.0) | float(0) }}"
+              horizon_dem_kwh: "{{ (adj_demand_daily * horizon_fraction) | round(2) }}"
+              horizon_pv_kwh: "{{ (adj_pv_daily * horizon_fraction) | round(2) }}"
+              horizon_kwh: "{{ max(horizon_dem_kwh - horizon_pv_kwh, 0) | round(2) }}"
+              log_needed: |-
+                {{ (horizon_kwh - prev_horizon) | abs >= 0.1
+                   or trigger.id in ['t_ha_start','t_tariff_change','t_cosy_time_changes','t_flux_time_changes'] }}
+          - target:
+              entity_id: input_number.rbc_adjusted_demand_next_horizon_kwh
+            data:
+              value: "{{ horizon_kwh }}"
+            action: input_number.set_value
+          - if:
+              - condition: template
+                value_template: "{{ log_needed }}"
+            then:
+              - variables:
+                  log_line: >-
+                    Next horizon = {{ next_start_hm }} → {{ next_end_hm }} ({{
+                    horizon_minutes }} min). Dem_hz={{ horizon_dem_kwh }} kWh,
+                    PV_hz={{ horizon_pv_kwh }} kWh ⇒ Net={{ horizon_kwh }} kWh.
+                    Tariff={{ states(ent_tariff) }}, RBCsrc=adj_demand_daily.
+                    Trigger={{ trigger.id }}.
+              - target:
+                  entity_id: "{{ ent_log_target }}"
+                data:
+                  value: "{{ log_line }}"
+                action: input_text.set_value
+              - data:
+                  name: RBC – Next Horizon (monitor)
+                  entity_id: "{{ ent_log_target }}"
+                  message: "{{ log_line }}"
+                action: logbook.log
+    default:
+      - data:
+          name: RBC – Next Horizon (monitor)
+          entity_id: input_text.rbc_horizon_log
+          message: >
+            No change. Using Cosy/Flux helpers to derive next→following horizon;
+            logging only.
+        action: logbook.log
+mode: single

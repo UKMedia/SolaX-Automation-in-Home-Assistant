@@ -1,0 +1,121 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – Free Energy Session Voice Announcer v1.8
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.8: PARAM-ONLY change to
+  use binary_sensor.dai_free_energy_live for precise Free Energy start/end
+  triggers; behaviour unchanged (capture→announce→restore→log). Design
+  Reference: DAI + RBC Framework v5.82 (Oct 2025). Change History: v1.8 (trigger
+  swap to Free Energy Live mirror); v1.7 (default logs only; manual runs
+  ignored); v1.6 (remove test trigger; retain capture→announce→restore).
+triggers:
+  - id: t_session_start
+    trigger: state
+    entity_id: binary_sensor.dai_free_energy_live
+    to: "on"
+  - id: t_session_end
+    trigger: state
+    entity_id: binary_sensor.dai_free_energy_live
+    to: "off"
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_session_end
+        sequence:
+          - variables:
+              prev_volume: >-
+                {{ state_attr('media_player.<your_sonos_entity>', 'volume_level') |
+                float(0.3) }}
+          - if:
+              - condition: template
+                value_template: "{{ announce_volume is number }}"
+            then:
+              - target:
+                  entity_id: media_player.<your_sonos_entity>
+                data:
+                  volume_level: "{{ announce_volume }}"
+                action: media_player.volume_set
+          - target:
+              device_id: <YOUR_TTS_DEVICE_ID>
+            data:
+              message: "{{ tts_message_end }}"
+              media_player_entity_id: media_player.<your_sonos_entity>
+            action: tts.speak
+          - delay:
+              seconds: 8
+          - target:
+              entity_id: media_player.<your_sonos_entity>
+            data:
+              volume_level: "{{ prev_volume }}"
+            action: media_player.volume_set
+          - data:
+              name: DAI – Free Energy Voice Announcer
+              message: >-
+                Announced END; volume restored to {{ (prev_volume*100) |
+                round(0) }}%.
+              entity_id: input_boolean.dai_session_override_active
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_session_start
+        sequence:
+          - variables:
+              prev_volume: >-
+                {{ state_attr('media_player.<your_sonos_entity>', 'volume_level') |
+                float(0.3) }}
+          - if:
+              - condition: template
+                value_template: "{{ announce_volume is number }}"
+            then:
+              - target:
+                  entity_id: media_player.<your_sonos_entity>
+                data:
+                  volume_level: "{{ announce_volume }}"
+                action: media_player.volume_set
+          - target:
+              device_id: <YOUR_TTS_DEVICE_ID>
+            data:
+              message: "{{ tts_message_start }}"
+              media_player_entity_id: media_player.<your_sonos_entity>
+            action: tts.speak
+          - delay:
+              seconds: 8
+          - target:
+              entity_id: media_player.<your_sonos_entity>
+            data:
+              volume_level: "{{ prev_volume }}"
+            action: media_player.volume_set
+          - data:
+              name: DAI – Free Energy Voice Announcer
+              message: >-
+                Announced START; volume restored to {{ (prev_volume*100) |
+                round(0) }}%.
+              entity_id: input_boolean.dai_session_override_active
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_ha_start
+        sequence:
+          - data:
+              name: DAI – Free Energy Voice Announcer
+              message: HA start detected; no announcement made.
+              entity_id: input_boolean.dai_session_override_active
+            action: logbook.log
+    default:
+      - data:
+          name: DAI – Free Energy Voice Announcer
+          message: Manual run ignored; no announcement.
+          entity_id: input_boolean.dai_session_override_active
+        action: logbook.log
+mode: single
+variables:
+  tts_message_start: Energy Management, Free Energy Session has now started.
+  tts_message_end: Energy Management, Free Energy Session has now ended.
+  announce_volume: 0.45

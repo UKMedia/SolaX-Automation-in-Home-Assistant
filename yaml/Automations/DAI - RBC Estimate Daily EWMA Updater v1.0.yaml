@@ -1,0 +1,67 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI – RBC Estimate Daily EWMA Updater v1.0 (Home Assistant automation)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – RBC Estimate Daily EWMA Updater v1.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). Updates the Daily Forecast
+  helper at 23:59 using an EWMA of today's Actual daily load. Numeric-safe,
+  clamped (0–120 kWh), with a 0.05 kWh deadband. Visual-Editor-safe.
+triggers:
+  - id: t_2359
+    trigger: time
+    at: "23:59:00"
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_ha_start
+          - condition: template
+            value_template: "{{ now().strftime('%H:%M') >= '23:59' }}"
+        sequence: []
+    default: []
+  - variables:
+      old_est_raw: "{{ states('input_number.dai_expected_usage_daily_kwh') }}"
+      old_est: |-
+        {{ old_est_raw | float(0)
+           if old_est_raw not in ['unknown','unavailable','none','', None] else 0.0 }}
+      actual_raw: "{{ states('sensor.brenchley_total_load_today_kwh') }}"
+      actual_daily: |-
+        {{ actual_raw | float(0)
+           if actual_raw not in ['unknown','unavailable','none','', None] else 0.0 }}
+      alpha_raw: "{{ states('input_number.rbc_ewma_alpha_daily') }}"
+      alpha: |-
+        {% set a = (alpha_raw | float(0.30)
+                    if alpha_raw not in ['unknown','unavailable','none','', None] else 0.30) %}
+        {% if a < 0 %}0{% elif a > 1 %}1{% else %}{{ a }}{% endif %}
+      unclamped: >-
+        {{ (1 - (alpha | float(0.30))) * (old_est | float(0)) + (alpha |
+        float(0.30)) * (actual_daily | float(0)) }}
+      max_kwh: 120
+      new_est: >-
+        {% set r = unclamped | float(0) %} {% if r < 0 %}0{% elif r > max_kwh
+        %}{{ max_kwh }}{% else %}{{ r }}{% endif %}
+      deadband: 0.05
+      delta: "{{ (new_est | float(0)) - (old_est | float(0)) }}"
+      need_write: "{{ (delta | float(0) | abs) > (deadband | float(0)) }}"
+  - condition: template
+    value_template: "{{ need_write }}"
+  - target:
+      entity_id: input_number.dai_expected_usage_daily_kwh
+    data:
+      value: "{{ new_est | float(0) | round(2) }}"
+    action: input_number.set_value
+  - data:
+      name: RBC — Daily Forecast EWMA
+      message: >-
+        {{ now().strftime('%Y-%m-%d %H:%M:%S') }} — Updated Daily Estimate via
+        EWMA: old={{ old_est | round(2) }} → new={{ new_est | round(2) }}
+        (actual={{ actual_daily | round(2) }}, α={{ alpha | round(2) }}, Δ={{
+        delta | round(2) }}).
+      entity_id: input_number.dai_expected_usage_daily_kwh
+    action: logbook.log
+mode: single

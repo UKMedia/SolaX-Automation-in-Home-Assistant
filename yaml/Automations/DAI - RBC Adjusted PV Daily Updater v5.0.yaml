@@ -1,0 +1,104 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI – RBC Adjusted PV Daily Updater v5.0 (Home Assistant automation)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – RBC Adjusted PV Daily Updater v5.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v5.0 removes the safety-cap
+  and EOD lock so Adjusted PV = Forecast + Bias (clamped). Writes whenever the
+  computed value changes by more than a small deadband. Visual-Editor-safe.
+triggers:
+  - id: t_midnight
+    trigger: time
+    at: "00:00:10"
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+  - id: t_forecast_change
+    trigger: state
+    entity_id: sensor.solcast_pv_forecast_forecast_today
+  - id: t_bias_change
+    trigger: state
+    entity_id: input_number.rbc_bias_pv_daily
+conditions: []
+actions:
+  - variables:
+      fc: "{{ states('sensor.solcast_pv_forecast_forecast_today') | float(0) }}"
+      bias: "{{ states('input_number.rbc_bias_pv_daily') | float(0) }}"
+      planned_unclamped: "{{ fc + bias }}"
+      planned: >
+        {% set r = planned_unclamped | float(0) %} {% if r < 0 %}0{% elif r >
+        max_kwh %}{{ max_kwh }}{% else %}{{ r }}{% endif %}
+      prev_adj: "{{ states('input_number.rbc_adjusted_pv_daily_kwh') | float(0) }}"
+      deadband: 0.01
+      delta: "{{ (planned | float(0)) - (prev_adj | float(0)) }}"
+      need_write: "{{ (delta | float(0) | abs) > (deadband | float(0)) }}"
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_midnight
+          - condition: template
+            value_template: "{{ need_write }}"
+        sequence:
+          - target:
+              entity_id: input_number.rbc_adjusted_pv_daily_kwh
+            data:
+              value: "{{ planned | float(0) | round(2) }}"
+            action: input_number.set_value
+          - data:
+              name: RBC — Adjusted PV (Daily)
+              message: >
+                Midnight refresh → Adjusted = Planned(Forecast {{ fc | round(2)
+                }} + Bias {{ bias | round(2) }}) = {{ planned | round(2) }} kWh
+                (prev {{ prev_adj | round(2) }}, Δ={{ delta | round(2) }}).
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_ha_start
+          - condition: template
+            value_template: "{{ need_write }}"
+        sequence:
+          - target:
+              entity_id: input_number.rbc_adjusted_pv_daily_kwh
+            data:
+              value: "{{ planned | float(0) | round(2) }}"
+            action: input_number.set_value
+          - data:
+              name: RBC — Adjusted PV (Daily)
+              message: >
+                HA start → Adjusted = Planned(Forecast {{ fc | round(2) }} +
+                Bias {{ bias | round(2) }}) = {{ planned | round(2) }} kWh (prev
+                {{ prev_adj | round(2) }}, Δ={{ delta | round(2) }}).
+            action: logbook.log
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: t_forecast_change
+              - condition: trigger
+                id: t_bias_change
+          - condition: template
+            value_template: "{{ need_write }}"
+        sequence:
+          - target:
+              entity_id: input_number.rbc_adjusted_pv_daily_kwh
+            data:
+              value: "{{ planned | float(0) | round(2) }}"
+            action: input_number.set_value
+          - data:
+              name: RBC — Adjusted PV (Daily)
+              message: >
+                {{ trigger.id }} → Adjusted = Planned(Forecast {{ fc | round(2)
+                }} + Bias {{ bias | round(2) }}) = {{ planned | round(2) }} kWh
+                (prev {{ prev_adj | round(2) }}, Δ={{ delta | round(2) }}).
+            action: logbook.log
+    default:
+      - data:
+          name: RBC — Adjusted PV (Daily)
+          message: >
+            Trigger {{ trigger.id | default('unknown') }} with no material
+            change (|Δ| ≤ {{ deadband }}). No write performed.
+        action: logbook.log
+mode: single
+variables:
+  max_kwh: 75

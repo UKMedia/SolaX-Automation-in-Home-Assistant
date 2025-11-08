@@ -1,0 +1,379 @@
+# =============================================================================
+# Public-Sanitised Export of: DAI – Minimise PV Clipping v2.1
+# Edits: redacted personal/calendar entities only (no logic changes).
+# Replace placeholders: <YOUR_FREE_ENERGY_CALENDAR_BINARY_SENSOR>,
+#                       <YOUR_SAVING_SESSIONS_BINARY_SENSOR>,
+#                       <YOUR_NOTIFY_ENTITY>
+# =============================================================================
+alias: DAI – Minimise PV Clipping v2.1
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v2.1: Compliance update to
+  Home Assistant syntax and helper IDs. Replaces all `action:` calls with
+  `service:` for Visual-Editor-safe execution; aligns dwell helper to
+  input_number.dai_hysteresis_min; quotes string states in waits/conditions.
+  Behaviour unchanged from v2.0 (mid-morning Feed-in Priority to avoid PV
+  clipping, hard 14:00 stop, helper cutoff, dual-SoC gates, hysteresis, locks,
+  Master-only writes).
+triggers:
+  - id: t_live_surplus
+    trigger: state
+    entity_id: sensor.dai_pv_surplus_5m_avg_w
+  - id: t_forecast_margin
+    trigger: state
+    entity_id: sensor.dai_surplus_headroom_margin_kwh
+  - id: t_master_soc
+    trigger: state
+    entity_id: sensor.solax_house_battery_capacity
+  - id: t_slave_soc
+    trigger: state
+    entity_id: sensor.solax_garage_battery_capacity
+  - id: t_threshold_edit
+    trigger: state
+    entity_id: input_number.dai_pv_surplus_threshold_w
+  - id: t_soc_floor_edit
+    trigger: state
+    entity_id: input_number.dai_min_soc_hard_floor
+  - id: t_soc_stop_edit
+    trigger: state
+    entity_id: input_number.dai_feedin_stop_soc
+  - id: t_schedule_tick
+    trigger: time_pattern
+    minutes: /5
+  - id: t_morning_init
+    trigger: time
+    at: "09:00:00"
+  - id: t_hard_deadline
+    trigger: time
+    at: "14:00:00"
+  - id: t_cutoff
+    trigger: time
+    at: input_datetime.dai_latest_feedin_cutoff
+  - id: t_agent_toggle
+    trigger: state
+    entity_id: input_boolean.dai_agent_active
+  - id: t_override_toggle
+    trigger: state
+    entity_id: input_boolean.dai_session_override_active
+conditions:
+  - condition: and
+    conditions:
+      - condition: time
+        after: "08:00:00"
+      - condition: state
+        entity_id: input_boolean.dai_agent_active
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.dai_session_override_active
+        state: "off"
+      - condition: not
+        conditions:
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: <YOUR_FREE_ENERGY_CALENDAR_BINARY_SENSOR>
+                state: "on"
+              - condition: state
+                entity_id: input_select.free_energy_session_today
+                state: "Yes"
+              - condition: state
+                entity_id: input_select.free_energy_session_today
+                state: "On"
+              - condition: state
+                entity_id: select.solax_house_charger_use_mode
+                state: Manual Mode
+              - condition: state
+                entity_id: <YOUR_SAVING_SESSIONS_BINARY_SENSOR>
+                state: "on"
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_morning_init
+          - condition: template
+            value_template: "{{ cutoff_ts > hard_deadline_ts }}"
+        sequence:
+          - data:
+              name: DAI — PV Clipping Clamp Notice
+              message: >-
+                Helper cutoff {{ cutoff_str }} is later than 14:00 → clamped to
+                14:00 for today.
+              entity_id: input_datetime.dai_latest_feedin_cutoff
+            action: logbook.log
+    default: []
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ hysteresis_active }}"
+        sequence:
+          - stop: true
+    default: []
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_hard_deadline
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ inv_mode != 'self_use' }}"
+                sequence:
+                  - target:
+                      entity_id: select.solax_house_charger_use_mode
+                    data:
+                      option: Self Use Mode
+                    action: select.select_option
+                  - wait_for_trigger:
+                      - trigger: state
+                        entity_id: select.solax_house_charger_use_mode
+                        to: Self Use Mode
+                    timeout: "00:00:20"
+                    continue_on_timeout: true
+                  - delay: "00:00:10"
+                  - choose:
+                      - conditions:
+                          - condition: state
+                            entity_id: select.solax_house_charger_use_mode
+                            state: Self Use Mode
+                          - condition: template
+                            value_template: "{{ notify_ok }}"
+                        sequence:
+                          - target:
+                              entity_id: input_datetime.last_mode_change
+                            data:
+                              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                            action: input_datetime.set_datetime
+                          - target:
+                              entity_id: input_datetime.dai_last_mode_notify
+                            data:
+                              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                            action: input_datetime.set_datetime
+                          - data:
+                              title: PV Clipping Minimiser
+                              message: 14:00 deadline → Mode changed to Self Use Mode.
+                            action: notify.<YOUR_NOTIFY_ENTITY>
+          - stop: true
+      - conditions:
+          - condition: trigger
+            id: t_cutoff
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ inv_mode != 'self_use' }}"
+                sequence:
+                  - target:
+                      entity_id: select.solax_house_charger_use_mode
+                    data:
+                      option: Self Use Mode
+                    action: select.select_option
+                  - wait_for_trigger:
+                      - trigger: state
+                        entity_id: select.solax_house_charger_use_mode
+                        to: Self Use Mode
+                    timeout: "00:00:20"
+                    continue_on_timeout: true
+                  - delay: "00:00:10"
+                  - choose:
+                      - conditions:
+                          - condition: state
+                            entity_id: select.solax_house_charger_use_mode
+                            state: Self Use Mode
+                          - condition: template
+                            value_template: "{{ notify_ok }}"
+                        sequence:
+                          - target:
+                              entity_id: input_datetime.last_mode_change
+                            data:
+                              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                            action: input_datetime.set_datetime
+                          - target:
+                              entity_id: input_datetime.dai_last_mode_notify
+                            data:
+                              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                            action: input_datetime.set_datetime
+                          - data:
+                              title: PV Clipping Minimiser
+                              message: >-
+                                Cutoff reached ({{ cutoff_str }}) → Mode changed
+                                to Self Use Mode.
+                            action: notify.<YOUR_NOTIFY_ENTITY>
+          - stop: true
+    default: []
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: |
+              {{ effective_allow_until_cutoff and want_feedin and dwell_ok and
+                 recent_ok and inv_mode != 'feedin_priority' and (not lockout_no_sun) }}
+        sequence:
+          - target:
+              entity_id: select.solax_house_charger_use_mode
+            data:
+              option: Feedin Priority
+            action: select.select_option
+          - wait_for_trigger:
+              - trigger: state
+                entity_id: select.solax_house_charger_use_mode
+                to: Feedin Priority
+            timeout: "00:00:20"
+            continue_on_timeout: true
+          - delay: "00:00:10"
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: select.solax_house_charger_use_mode
+                    state: Feedin Priority
+                  - condition: template
+                    value_template: "{{ notify_ok }}"
+                sequence:
+                  - target:
+                      entity_id: input_datetime.last_mode_change
+                    data:
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                    action: input_datetime.set_datetime
+                  - target:
+                      entity_id: input_datetime.dai_last_mode_notify
+                    data:
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                    action: input_datetime.set_datetime
+                  - data:
+                      title: PV Clipping Minimiser
+                      message: >
+                        Mode → Feedin Priority. {{ reason_text if reason_text !=
+                        'All gates true' else 'All gates true' }}
+                    action: notify.<YOUR_NOTIFY_ENTITY>
+      - conditions:
+          - condition: template
+            value_template: |
+              {{ effective_allow_until_cutoff and (not want_feedin) and dwell_ok
+                 and recent_ok and inv_mode != 'self_use' and (not hold_feedin_hysteresis) }}
+        sequence:
+          - target:
+              entity_id: select.solax_house_charger_use_mode
+            data:
+              option: Self Use Mode
+            action: select.select_option
+          - wait_for_trigger:
+              - trigger: state
+                entity_id: select.solax_house_charger_use_mode
+                to: Self Use Mode
+            timeout: "00:00:20"
+            continue_on_timeout: true
+          - delay: "00:00:10"
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: select.solax_house_charger_use_mode
+                    state: Self Use Mode
+                  - condition: template
+                    value_template: "{{ notify_ok }}"
+                sequence:
+                  - target:
+                      entity_id: input_datetime.last_mode_change
+                    data:
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                    action: input_datetime.set_datetime
+                  - target:
+                      entity_id: input_datetime.dai_last_mode_notify
+                    data:
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                    action: input_datetime.set_datetime
+                  - data:
+                      title: PV Clipping Minimiser
+                      message: >
+                        Mode → Self Use. Reason: {{ reason_text if reason_text
+                        != 'All gates true' else 'Return path / safety' }}.
+                    action: notify.<YOUR_NOTIFY_ENTITY>
+    default: []
+mode: single
+variables:
+  forecast_ok: "{{ states('sensor.dai_surplus_headroom_margin_kwh') | float(0) > 0 }}"
+  live_ok: >
+    {% set live = states('sensor.dai_pv_surplus_5m_avg_w') | float(0) %} {% set
+    thr  = states('input_number.dai_pv_surplus_threshold_w') | float(0) %} {{
+    live >= thr }}
+  master_soc: "{{ states('sensor.solax_house_battery_capacity') | float(0) }}"
+  slave_soc: "{{ states('sensor.solax_garage_battery_capacity') | float(0) }}"
+  both_over_55: "{{ master_soc >= 55 and slave_soc >= 55 }}"
+  both_over_53: "{{ master_soc >= 53 and slave_soc >= 53 }}"
+  soc_band_ok: >
+    {% set soc = master_soc %} {% set minf =
+    states('input_number.dai_min_soc_hard_floor') | float(0) %} {% set stop =
+    states('input_number.dai_feedin_stop_soc') | float(100) %} {{ soc > minf and
+    soc < stop }}
+  want_feedin: "{{ forecast_ok and live_ok and soc_band_ok and both_over_55 }}"
+  current_mode: "{{ states('select.solax_house_charger_use_mode') }}"
+  inv_mode: >
+    {% set raw = current_mode | lower %} {% if 'feed' in raw %}feedin_priority
+    {% elif 'self' in raw %}self_use {% else %}unknown{% endif %}
+  cutoff_str: "{{ states('input_datetime.dai_latest_feedin_cutoff') }}"
+  cutoff_ts: |-
+    {% set s = cutoff_str %}
+    {% if s in [none, 'unknown', 'unavailable', ''] %}
+      0
+    {% else %}
+      {% if s | length <= 8 %}
+        {{ as_timestamp(strptime(now().date() | string ~ ' ' ~ s, '%Y-%m-%d %H:%M:%S')) }}
+      {% else %}
+        {{ as_timestamp(strptime(s, '%Y-%m-%d %H:%M:%S')) }}
+      {% endif %}
+    {% endif %}
+  hard_deadline_ts: >-
+    {{ as_timestamp(strptime(now().date() | string ~ ' 14:00:00', '%Y-%m-%d
+    %H:%M:%S')) }}
+  effective_cutoff_ts: >-
+    {% if cutoff_ts == 0 %}0{% else %}{{ [cutoff_ts, hard_deadline_ts] | min
+    }}{% endif %}
+  effective_allow_until_cutoff: "{{ effective_cutoff_ts != 0 and as_timestamp(now()) < effective_cutoff_ts }}"
+  hold_feedin_hysteresis: "{{ inv_mode == 'feedin_priority' and both_over_53 }}"
+  hysteresis_active: >-
+    {{ inv_mode == 'feedin_priority' and both_over_53 and
+    effective_allow_until_cutoff }}
+  min_dwell_min: "{{ states('input_number.dai_hysteresis_min') | int(10) }}"
+  last_change_str: "{{ states('input_datetime.last_mode_change') }}"
+  last_change_ts: >-
+    {% set s = last_change_str %} {% if s in [none, 'unknown', 'unavailable',
+    ''] %}0 {% else %}{{ as_timestamp(strptime(s, '%Y-%m-%d %H:%M:%S')) }}{%
+    endif %}
+  minutes_since_change: "{{ ((as_timestamp(now()) - last_change_ts) / 60) | float(999) }}"
+  recent_mode_change_sec: >-
+    {{ (as_timestamp(now()) -
+    as_timestamp(states.select.solax_house_charger_use_mode.last_changed)) |
+    float(9999) }}
+  dwell_ok: "{{ minutes_since_change >= min_dwell_min }}"
+  recent_ok: "{{ recent_mode_change_sec > 30 }}"
+  soc_current_mode: "{{ states('input_select.soc_current_mode_new') }}"
+  lockout_no_sun: "{{ soc_current_mode == 'No Sun' }}"
+  notify_gap_sec: 120
+  last_notify_str: "{{ states('input_datetime.dai_last_mode_notify') }}"
+  last_notify_ts: >-
+    {% set s = last_notify_str %} {% if s in [none, 'unknown', 'unavailable',
+    ''] %}0 {% else %}{{ as_timestamp(strptime(s, '%Y-%m-%d %H:%M:%S')) }}{%
+    endif %}
+  seconds_since_notify: "{{ (as_timestamp(now()) - last_notify_ts) | float(99999) }}"
+  notify_ok: "{{ seconds_since_notify > notify_gap_sec }}"
+  desired_mode_text: |-
+    {% if not effective_allow_until_cutoff %}
+      SelfUse (Post-cutoff guard)
+    {% elif lockout_no_sun %}
+      SelfUse (No Sun lockout)
+    {% elif inv_mode == 'feedin_priority' and both_over_53 %}
+      FeedInPriority (hysteresis hold ≥53%)
+    {% elif forecast_ok and live_ok and soc_band_ok and both_over_55 %}
+      FeedInPriority (≥55% dual-SoC gate)
+    {% elif forecast_ok and live_ok and soc_band_ok and not both_over_55 %}
+      Wait — minimum SoC (both ≥55%)
+    {% else %}
+      SelfUse
+    {% endif %}
+  reason_text: >-
+    {% set r = [] %} {% if not effective_allow_until_cutoff %}{% set r = r +
+    ['Post-cutoff guard'] %}{% endif %} {% if not forecast_ok %}{% set r = r +
+    ['Forecast gate false'] %}{% endif %} {% if not live_ok %}{% set r = r +
+    ['Live surplus below threshold'] %}{% endif %} {% if not soc_band_ok %}{%
+    set r = r + ['SoC outside band'] %}{% endif %} {% if inv_mode ==
+    'feedin_priority' and both_over_53 %}
+      {% set r = r + ['Hysteresis hold (≥53% dual-SoC)'] %}
+    {% elif forecast_ok and live_ok and soc_band_ok and (not both_over_55) %}
+      {% set r = r + ['Waiting for minimum SoC (both batteries ≥55%)'] %}
+    {% endif %} {{ ' & '.join(r) if r else 'All gates true' }}

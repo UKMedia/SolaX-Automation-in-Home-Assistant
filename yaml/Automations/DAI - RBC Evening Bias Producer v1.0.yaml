@@ -1,0 +1,53 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI – RBC Evening Bias Producer v1.0 (Home Assistant automation)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – RBC Evening Bias Producer v1.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.0: Nightly producer that
+  invokes the 'RBC – Update Bias (Evening 16–22)' blueprint script after the
+  Active Period ends so the smoothed bias (kWh) is ready for next-day planning.
+  Includes HA-start safety with a post-22:10 time gate. No inline maths here;
+  the blueprint applies EWMA, clipping, last-period idempotence and writes the
+  bias helper. Design Reference: DAI + RBC Framework v5.85 (Oct 2025). Change
+  History: v1.0 (initial release).
+triggers:
+  - id: t_2340
+    trigger: time
+    at: "23:40:00"
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_2340
+        sequence:
+          - target:
+              entity_id: script.rbc_update_bias_evening_16_22
+            action: script.turn_on
+          - data:
+              name: RBC – Evening Bias Producer
+              message: Scheduled run at 23:40 invoked the blueprint script.
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_ha_start
+          - condition: time
+            after: "22:10:00"
+        sequence:
+          - target:
+              entity_id: script.rbc_update_bias_evening_16_22
+            action: script.turn_on
+          - data:
+              name: RBC – Evening Bias Producer
+              message: HA-start catch-up invoked the blueprint script (post 22:10).
+            action: logbook.log
+    default:
+      - data:
+          name: RBC – Evening Bias Producer
+          message: Default branch hit – no matching conditions; blueprint not invoked.
+        action: logbook.log
+mode: single
