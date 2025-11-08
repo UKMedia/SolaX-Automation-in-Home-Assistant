@@ -1,0 +1,185 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – Cosy Night Cheap Charge v1.2
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.2: Added explicit 23:59
+  Hard Stop with 5 s dwell and 00:02 verifier branch. Functional logic
+  unchanged. Design-Doc: DAI + RBC Framework v5.84 (Oct 2025). Change History:
+  v1.2 (hard-stop + 00:02 verifier); v1.1 (consolidated Start/End); v1.0
+  (initial Cosy-only unified logic). **Governance Reference:** CR001 (Addendum A
+  – Trigger-Only Enhancement approved 26-10-2025).
+triggers:
+  - id: t_start_2200
+    trigger: time
+    at: "22:00:00"
+  - id: t_tick_2200_2359
+    trigger: time_pattern
+    minutes: /1
+  - id: t_hard_stop_2359
+    trigger: time
+    at: "23:59:00"
+  - id: t_verify_0002
+    trigger: time
+    at: "00:02:00"
+  - id: t_tariff_change
+    trigger: state
+    entity_id: input_select.octopus_tariff_d
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_start_2200
+          - condition: state
+            entity_id: input_boolean.dai_session_override_active
+            state: "off"
+          - condition: state
+            entity_id: input_select.octopus_tariff_d
+            state: Cosy
+        sequence:
+          - if:
+              - condition: template
+                value_template: |
+                  {{ states('sensor.solax_house_battery_capacity') | float(0)
+                     < states('number.solax_house_selfuse_nightcharge_upper_soc') | float(0) }}
+            then:
+              - target:
+                  entity_id: select.solax_house_charger_use_mode
+                data:
+                  option: Manual Mode
+                action: select.select_option
+              - target:
+                  entity_id: select.solax_house_manual_mode_select
+                data:
+                  option: Force Charge
+                action: select.select_option
+            else:
+              - target:
+                  entity_id: select.solax_house_charger_use_mode
+                data:
+                  option: Self Use Mode
+                action: select.select_option
+          - data:
+              name: DAI Cosy Night Cheap Charge
+              message: 22:00 start triggered – mode adjusted per SoC and target.
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_tick_2200_2359
+          - condition: time
+            after: "22:00:00"
+            before: "23:59:00"
+          - condition: state
+            entity_id: input_boolean.dai_session_override_active
+            state: "off"
+          - condition: state
+            entity_id: input_select.octopus_tariff_d
+            state: Cosy
+        sequence:
+          - variables:
+              soc: "{{ states('sensor.solax_house_battery_capacity') | float(0) }}"
+              target: >-
+                {{ states('number.solax_house_selfuse_nightcharge_upper_soc') |
+                float(0) }}
+          - if:
+              - condition: template
+                value_template: "{{ soc <= (target - 1) }}"
+            then:
+              - target:
+                  entity_id: select.solax_house_charger_use_mode
+                data:
+                  option: Manual Mode
+                action: select.select_option
+              - target:
+                  entity_id: select.solax_house_manual_mode_select
+                data:
+                  option: Force Charge
+                action: select.select_option
+            else:
+              - if:
+                  - condition: template
+                    value_template: "{{ soc >= target }}"
+                then:
+                  - target:
+                      entity_id: select.solax_house_charger_use_mode
+                    data:
+                      option: Self Use Mode
+                    action: select.select_option
+      - conditions:
+          - condition: trigger
+            id: t_hard_stop_2359
+          - condition: state
+            entity_id: input_boolean.dai_session_override_active
+            state: "off"
+        sequence:
+          - delay: "00:00:05"
+          - target:
+              entity_id: select.solax_house_charger_use_mode
+            data:
+              option: Self Use Mode
+            action: select.select_option
+          - data:
+              name: DAI Cosy Night Cheap Charge
+              message: Hard Stop applied at 23:59 – inverter set to Self Use.
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_verify_0002
+          - condition: state
+            entity_id: input_boolean.dai_session_override_active
+            state: "off"
+          - condition: template
+            value_template: >
+              {{ states('select.solax_house_charger_use_mode') != "Self Use
+              Mode" }}
+        sequence:
+          - target:
+              entity_id: select.solax_house_charger_use_mode
+            data:
+              option: Self Use Mode
+            action: select.select_option
+          - data:
+              name: DAI Cosy Night Cheap Charge
+              message: 00:02 verifier detected Manual Mode – corrected to Self Use.
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_tariff_change
+          - condition: state
+            entity_id: input_boolean.dai_session_override_active
+            state: "off"
+        sequence:
+          - target:
+              entity_id: select.solax_house_charger_use_mode
+            data:
+              option: Self Use Mode
+            action: select.select_option
+          - data:
+              name: DAI Cosy Night Cheap Charge
+              message: Tariff changed – exited Cosy window, set Self Use Mode.
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_ha_start
+          - condition: state
+            entity_id: input_boolean.dai_session_override_active
+            state: "off"
+          - condition: time
+            after: "22:00:00"
+            before: "23:59:00"
+        sequence:
+          - data:
+              name: DAI Cosy Night Cheap Charge
+              message: HA restart within Cosy window – state re-evaluated next tick.
+            action: logbook.log
+    default:
+      - data:
+          name: DAI Cosy Night Cheap Charge
+          message: Trigger did not match any active branch – no action.
+        action: logbook.log
+mode: single

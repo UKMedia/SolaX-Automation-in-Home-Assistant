@@ -1,0 +1,88 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – Actual Demand 16-22 Tariff Switcher v1.2
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.2: Update selector entity
+  to select.dai_actual_demand_16_22_kwh. Controls the Utility Meter tariff for
+  Actual Demand 16–22 kWh. Switches to active_16_22 at 16:00 and off at 22:00,
+  with HA-start self-heal to ensure correct state after restart. Design
+  Reference: DAI + RBC Framework v5.85 (Oct 2025). Change History: v1.2 (fix
+  selector entity id); v1.1 (add inline comments); v1.0 (initial release).
+triggers:
+  - id: t_1600
+    trigger: time
+    at: "16:00:00"
+  - id: t_2200
+    trigger: time
+    at: "22:00:00"
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_1600
+        sequence:
+          - target:
+              entity_id: select.dai_actual_demand_16_22_kwh
+            data:
+              option: active_16_22
+            action: select.select_option
+          - data:
+              name: DAI – Tariff Switcher
+              message: Switched tariff to active_16_22 at 16:00 for Actual 16–22 meter.
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_2200
+        sequence:
+          - target:
+              entity_id: select.dai_actual_demand_16_22_kwh
+            data:
+              option: "off"
+            action: select.select_option
+          - data:
+              name: DAI – Tariff Switcher
+              message: Switched tariff to off at 22:00 for Actual 16–22 meter.
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_ha_start
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: time
+                    after: "16:00:00"
+                    before: "22:00:00"
+                sequence:
+                  - target:
+                      entity_id: select.dai_actual_demand_16_22_kwh
+                    data:
+                      option: active_16_22
+                    action: select.select_option
+                  - data:
+                      name: DAI – Tariff Switcher
+                      message: >-
+                        HA start self-heal set tariff to active_16_22 (within
+                        16:00–22:00).
+                    action: logbook.log
+            default:
+              - target:
+                  entity_id: select.dai_actual_demand_16_22_kwh
+                data:
+                  option: "off"
+                action: select.select_option
+              - data:
+                  name: DAI – Tariff Switcher
+                  message: HA start self-heal set tariff to off (outside 16:00–22:00).
+                action: logbook.log
+    default:
+      - data:
+          name: DAI – Tariff Switcher
+          message: Default branch hit – no change.
+        action: logbook.log
+mode: single

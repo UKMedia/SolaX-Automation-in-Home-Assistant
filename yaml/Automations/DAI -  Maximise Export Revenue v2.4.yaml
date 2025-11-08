@@ -1,0 +1,290 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI - Maximise Export Revenue v2.4
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v2.4 adds **desync guards**
+  using the Tariff Desync helpers. If Import/Export tariffs are out of sync
+  beyond thresholds, export forcing is paused and handed back to Self Use (HALT
+  always; WARN only when Soft Pause is ON). Still targets Outgoing Flux and
+  keeps SoC safeguards. Uses input_select.octopus_export_tariff.
+triggers:
+  - id: start_window
+    trigger: time
+    at: input_datetime.dai_flux_export_start
+  - id: end_window
+    trigger: time
+    at: input_datetime.dai_flux_export_end
+  - id: calc_5min
+    trigger: time_pattern
+    minutes: /5
+  - id: debug
+    trigger: state
+    entity_id: input_number.debug_branch
+  - id: export_helper_change
+    trigger: state
+    entity_id: input_select.octopus_export_tariff
+  - id: import_helper_change
+    trigger: state
+    entity_id: input_select.octopus_import_tariff
+conditions:
+  - condition: state
+    entity_id: input_select.octopus_export_tariff
+    state: Outgoing Flux
+  - condition: or
+    conditions:
+      - condition: template
+        value_template: "{{ in_export_window }}"
+      - condition: template
+        value_template: "{{ trig_id == 'end_window' }}"
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trig_id == 'start_window' }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: or
+                    conditions:
+                      - condition: template
+                        value_template: "{{ session_override }}"
+                      - condition: template
+                        value_template: "{{ cold_active }}"
+                      - condition: template
+                        value_template: "{{ desync_halt or (desync_warn and soft_pause) }}"
+                sequence:
+                  - target:
+                      entity_id: select.solax_house_charger_use_mode
+                    data:
+                      option: Self Use Mode
+                    action: select.select_option
+                  - data:
+                      message: >-
+                        Export start blocked: {{ 'Session Override' if
+                        session_override else ('Cold Override' if cold_active
+                        else ('Desync HALT' if desync_halt else 'Desync WARN
+                        (Soft Pause)')) }}. Import={{ import_label }}, Export={{
+                        export_label }}, Age={{ age_min }}m, Warn={{ warn_min
+                        }}m, Halt={{ halt_min }}m.
+                    action: notify.<your_device_name_here>
+                  - data:
+                      name: DAI — Export Revenue
+                      message: >-
+                        Start blocked ({{ 'override' if session_override else
+                        ('cold' if cold_active else 'desync') }}). SoC={{
+                        min_soc_now | round(1) }}%. Import={{ import_label }},
+                        Export={{ export_label }}, Age={{ age_min }}m.
+                      entity_id: input_datetime.dai_flux_export_start
+                    action: logbook.log
+            default:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ both_above_gate }}"
+                    sequence:
+                      - target:
+                          entity_id: select.solax_house_charger_use_mode
+                        data:
+                          option: Manual Mode
+                        action: select.select_option
+                      - delay: "00:00:02"
+                      - target:
+                          entity_id: select.solax_house_manual_mode_select
+                        data:
+                          option: Force Discharge
+                        action: select.select_option
+                      - target:
+                          entity_id: input_number.stop_discharge_level
+                        data:
+                          value: "{{ computed_stop_pct }}"
+                        action: input_number.set_value
+                      - data:
+                          message: >-
+                            Export start → Force Discharge. Stop={{
+                            computed_stop_pct }}%, SoC={{ min_soc_now | round(1)
+                            }}%. Cover until cheap (~{{ hours_to_cheap_start
+                            }}h, {{ required_kwh_until_cheap }}kWh).
+                        action: notify.<your_device_name_here>
+                      - data:
+                          name: DAI — Export Revenue
+                          message: >-
+                            Started export. Stop={{ computed_stop_pct }}%
+                            (planner={{ planner_target | round(0) }}%, min
+                            floor={{ min_export_floor | round(0) }}%). Import={{
+                            import_label }}, Export={{ export_label }}.
+                          entity_id: input_datetime.dai_flux_export_start
+                        action: logbook.log
+                default:
+                  - data:
+                      message: >-
+                        Export start skipped — SoC below gate. SoC={{
+                        min_soc_now | round(1) }}%, Gate={{ start_gate_level |
+                        round(0) }}%.
+                    action: notify.<your_device_name_here>
+                  - data:
+                      name: DAI — Export Revenue
+                      message: >-
+                        Start skipped (below gate). SoC={{ min_soc_now |
+                        round(1) }}%, Gate={{ start_gate_level | round(0) }}%.
+                      entity_id: input_datetime.dai_flux_export_start
+                    action: logbook.log
+      - conditions:
+          - condition: template
+            value_template: "{{ trig_id == 'calc_5min' and in_export_window }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: or
+                    conditions:
+                      - condition: template
+                        value_template: "{{ session_override }}"
+                      - condition: template
+                        value_template: "{{ cold_active }}"
+                      - condition: template
+                        value_template: "{{ desync_halt or (desync_warn and soft_pause) }}"
+                sequence:
+                  - target:
+                      entity_id: select.solax_house_charger_use_mode
+                    data:
+                      option: Self Use Mode
+                    action: select.select_option
+                  - data:
+                      message: >-
+                        Export paused — {{ 'Session Override' if
+                        session_override else ('Cold Override' if cold_active
+                        else ('Desync HALT' if desync_halt else 'Desync WARN
+                        (Soft Pause)')) }}. Import={{ import_label }}, Export={{
+                        export_label }}, Age={{ age_min }}m.
+                    action: notify.<your_device_name_here>
+                  - data:
+                      name: DAI — Export Revenue
+                      message: >-
+                        Paused export ({{ 'override' if session_override else
+                        ('cold' if cold_active else 'desync') }}). Import={{
+                        import_label }}, Export={{ export_label }}, Age={{
+                        age_min }}m.
+                      entity_id: input_datetime.dai_flux_export_start
+                    action: logbook.log
+            default:
+              - target:
+                  entity_id: input_number.stop_discharge_level
+                data:
+                  value: "{{ computed_stop_pct }}"
+                action: input_number.set_value
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ min_soc_now <= computed_stop_pct }}"
+                    sequence:
+                      - target:
+                          entity_id: select.solax_house_charger_use_mode
+                        data:
+                          option: Feedin Priority
+                        action: select.select_option
+                      - data:
+                          message: >-
+                            Export floor reached → Feedin Priority. SoC={{
+                            min_soc_now | round(1) }}%, Stop={{
+                            computed_stop_pct }}%.
+                        action: notify.<your_device_name_here>
+                      - data:
+                          name: DAI — Export Revenue
+                          message: >-
+                            Floor hit → Feedin Priority (SoC={{ min_soc_now |
+                            round(1) }}%, stop={{ computed_stop_pct }}%).
+                          entity_id: input_number.stop_discharge_level
+                        action: logbook.log
+      - conditions:
+          - condition: template
+            value_template: "{{ trig_id == 'end_window' }}"
+        sequence:
+          - target:
+              entity_id: select.solax_house_charger_use_mode
+            data:
+              option: Self Use Mode
+            action: select.select_option
+          - data:
+              message: Export window ended → Self Use Mode.
+            action: notify.<your_device_name_here>
+          - data:
+              name: DAI — Export Revenue
+              message: Ended export window → Self Use.
+              entity_id: input_datetime.dai_flux_export_end
+            action: logbook.log
+    default:
+      - data:
+          title: DAI — Maximise Export Revenue v2.4
+          message: >-
+            Unmatched branch. trig_id={{ trig_id }}, OutgoingFlux={{
+            outgoing_flux_active }}, in_window={{ in_export_window }}, SoC={{
+            min_soc_now | round(1) }}%, stop={{ computed_stop_pct }}%. Import={{
+            import_label }}, Export={{ export_label }}, Age={{ age_min }}m.
+        action: persistent_notification.create
+mode: restart
+variables:
+  import_label: "{{ states('input_select.octopus_import_tariff') }}"
+  export_label: "{{ states('input_select.octopus_export_tariff') }}"
+  outgoing_flux_active: "{{ export_label == 'Outgoing Flux' }}"
+  warn_min: "{{ states('input_number.tariff_desync_warn_minutes') | float(30) }}"
+  halt_min: "{{ states('input_number.tariff_desync_halt_minutes') | float(180) }}"
+  soft_pause: "{{ is_state('input_boolean.tariff_desync_soft_pause','on') }}"
+  import_changed_ts: >-
+    {{ as_timestamp(states.input_select.octopus_import_tariff.last_changed, 0)
+    }}
+  export_changed_ts: >-
+    {{ as_timestamp(states.input_select.octopus_export_tariff.last_changed, 0)
+    }}
+  last_flip_ts: "{{ [import_changed_ts, export_changed_ts] | max }}"
+  now_ts: "{{ as_timestamp(now()) }}"
+  age_min: >-
+    {% if import_label != export_label and import_label not in
+    ['unknown','unavailable',''] and export_label not in
+    ['unknown','unavailable',''] %}
+      {{ ((now_ts - last_flip_ts) / 60) | round(1) }}
+    {% else %}0{% endif %}
+  desync_warn: >-
+    {{ import_label != export_label and age_min >= warn_min and age_min <
+    halt_min }}
+  desync_halt: "{{ import_label != export_label and age_min >= halt_min }}"
+  session_override: "{{ is_state('input_boolean.dai_session_override_active','on') }}"
+  start_gate_level: "{{ states('input_number.soc_start_discharge_level') | float(0) }}"
+  min_export_floor: "{{ states('input_number.dai_export_min_stop_floor') | float(25) }}"
+  planner_target: "{{ states('number.solax_house_selfuse_nightcharge_upper_soc') | float(0) }}"
+  usage_3d_kwh_day: "{{ states('sensor.dai_usage_median_3d_kwh') | float(0) }}"
+  cold_threshold_c: "{{ states('input_number.dai_cold_temp_threshold_c') | float(3) }}"
+  outside_temp_c: "{{ states('sensor.ashp_hot_water_outside_temperature') | float(99) }}"
+  cold_active: "{{ outside_temp_c <= cold_threshold_c }}"
+  cheap_start_str: "{{ states('input_datetime.dai_flux_overnight_start') }}"
+  exp_start_str: "{{ states('input_datetime.dai_flux_export_start') }}"
+  exp_end_str: "{{ states('input_datetime.dai_flux_export_end') }}"
+  now_hms: "{{ now().strftime('%H:%M:%S') }}"
+  in_export_window: >-
+    {% set s = exp_start_str if exp_start_str else '16:00:00' %} {% set e =
+    exp_end_str if exp_end_str else '19:00:00' %} {{ s <= now_hms <= e }}
+  house_soc: "{{ states('sensor.solax_house_battery_capacity') | float(0) }}"
+  garage_soc: "{{ states('sensor.solax_garage_battery_capacity') | float(0) }}"
+  min_soc_now: "{{ [house_soc, garage_soc] | min }}"
+  total_batt_kwh: 21
+  max_stop_cap: 95
+  usage_per_hour_kwh: "{% set v = (usage_3d_kwh_day / 24.0) %} {{ [v, 0] | max | round(3) }}"
+  hours_to_cheap_start: >-
+    {% set tstr = cheap_start_str if cheap_start_str else '02:00:00' %} {% set
+    parts = (tstr.split(':') if tstr else ['02','00','00']) %} {% set hh =
+    (parts[0] | int(0)) %} {% set mm = (parts[1] | int(0)) %} {% set ss =
+    (parts[2] | int(0)) %} {% set candidate = now().replace(hour=hh, minute=mm,
+    second=ss, microsecond=0) %} {% set target = candidate if candidate > now()
+    else (candidate + timedelta(days=1)) %} {% set diff = ((as_timestamp(target)
+    - as_timestamp(now())) / 3600) %} {{ [diff, 0] | max | round(2) }}
+  required_kwh_until_cheap: "{{ (usage_per_hour_kwh * hours_to_cheap_start) | round(3) }}"
+  required_pct_until_cheap: >-
+    {% set cap = total_batt_kwh | float(0) %} {{ (required_kwh_until_cheap / cap
+    * 100.0) if cap > 0 else 0.0 }}
+  computed_stop_raw: |-
+    {{ [required_pct_until_cheap | float(0),
+        min_export_floor | float(0),
+        planner_target | float(0)] | max }}
+  computed_stop_pct: "{{ [computed_stop_raw | float(0), max_stop_cap] | min | round(1) }}"
+  both_above_gate: "{{ min_soc_now >= start_gate_level }}"
+  trig_id: "{{ (trigger.id if trigger is defined and trigger.id is not none else '') }}"
