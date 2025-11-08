@@ -1,0 +1,82 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – Forecast 16-22 Writer v1.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.0: Writer to keep
+  input_number.dai_forecast_demand_16_22_kwh synced to the Horizon forecast
+  (16:00–22:00) stored in input_number.rbc_adjusted_demand_next_horizon_kwh.
+  Triggers on horizon updates, plus timed safety writes at 13:05 and 15:55, and
+  HA-start guard if the system boots during the 13:00–16:00 window. No inverter
+  writes. Design Reference: DAI + RBC Framework v5.85 (Oct 2025). Change
+  History: v1.0 (initial release).
+triggers:
+  - id: t_horizon_change
+    trigger: state
+    entity_id: input_number.rbc_adjusted_demand_next_horizon_kwh
+  - id: t_1305
+    trigger: time
+    at: "13:05:00"
+  - id: t_1555
+    trigger: time
+    at: "15:55:00"
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - variables:
+      horizon_kwh: >-
+        {{ states('input_number.rbc_adjusted_demand_next_horizon_kwh') |
+        float(0) }}
+      current_forecast_kwh: "{{ states('input_number.dai_forecast_demand_16_22_kwh') | float(0) }}"
+      change_needed: "{{ (horizon_kwh - current_forecast_kwh) | abs >= 0.01 }}"
+      now_hm: "{{ now().strftime('%H:%M') }}"
+      in_cheap_window: "{{ '13:00' <= now_hm <= '16:00' }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ change_needed }}"
+        sequence:
+          - target:
+              entity_id: input_number.dai_forecast_demand_16_22_kwh
+            data:
+              value: "{{ [ [ horizon_kwh, 0 ] | max, 40 ] | min | round(2) }}"
+            action: input_number.set_value
+          - data:
+              name: DAI – Forecast 16-22 Writer
+              entity_id: input_text.dai_night_planner_reason
+              message: >-
+                {{ trigger.id | default('n/a') }} – Forecast16-22 updated → {{ [
+                [ horizon_kwh, 0 ] | max, 40 ] | min | round(2) }} kWh
+                (Horizon={{ horizon_kwh | round(2) }} kWh, Prev={{
+                current_forecast_kwh | round(2) }} kWh).
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_ha_start
+          - condition: template
+            value_template: "{{ in_cheap_window }}"
+        sequence:
+          - target:
+              entity_id: input_number.dai_forecast_demand_16_22_kwh
+            data:
+              value: "{{ [ [ horizon_kwh, 0 ] | max, 40 ] | min | round(2) }}"
+            action: input_number.set_value
+          - data:
+              name: DAI – Forecast 16-22 Writer
+              entity_id: input_text.dai_night_planner_reason
+              message: >-
+                HA-start guard – Forecast16-22 set to {{ [ [ horizon_kwh, 0 ] |
+                max, 40 ] | min | round(2) }} kWh (window 13:00–16:00).
+            action: logbook.log
+    default:
+      - data:
+          name: DAI – Forecast 16-22 Writer
+          entity_id: input_text.dai_night_planner_reason
+          message: >-
+            No update required (Horizon={{ horizon_kwh | round(2) }} kWh,
+            Current={{ current_forecast_kwh | round(2) }} kWh).
+        action: logbook.log
+mode: single

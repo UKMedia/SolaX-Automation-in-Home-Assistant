@@ -1,0 +1,82 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – Daily Demand Estimator Seed v5.3.1
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v5.3.1: Replace invalid
+  'count ≥ 3' guard (attribute not available on v3 stats sensor) with robust
+  validity checks: numeric state > 0 AND (source_value_valid = true OR
+  age_coverage_ratio > 0). Retains 06:00 seed, 06:10 safety, 08:00 retry, and
+  HA-start-after-06:00 guard; clamps 0–120 kWh, round(2); Visual-Editor-safe
+  services. Design Reference: DAI + RBC Framework v5.8 (Oct 2025). Change
+  History: v5.3.1 (validity guards update); v5.3 (service: compliance, v3 source
+  kept); v5.2 (source=v3, added 08:00 retry).
+triggers:
+  - id: t_0600
+    trigger: time
+    at: "06:00:00"
+  - id: t_0610_safety
+    trigger: time
+    at: "06:10:00"
+  - id: t_0800_retry
+    trigger: time
+    at: "08:00:00"
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: t_0600
+              - condition: trigger
+                id: t_0610_safety
+              - condition: trigger
+                id: t_0800_retry
+              - condition: trigger
+                id: t_ha_start
+          - condition: template
+            value_template: "{{ src_state not in ['unknown','unavailable','none',''] }}"
+          - condition: time
+            after: "06:00:00"
+            before: "23:59:59"
+          - condition: template
+            value_template: |
+              {{ (src_num > 0) and (src_valid or (src_age_cov > 0)) }}
+        sequence:
+          - target:
+              entity_id: input_number.dai_expected_usage_daily_kwh
+            data:
+              value: "{{ dai_daily_median_seed }}"
+            action: input_number.set_value
+          - data:
+              name: DAI Estimator
+              message: >
+                Seeded Daily Demand from 3-day median (v3) → {{
+                dai_daily_median_seed }} kWh (trigger={{ trigger.id }}, valid={{
+                src_valid }}, age_cov={{ src_age_cov }}).
+            action: logbook.log
+    default:
+      - data:
+          name: DAI Estimator
+          message: >
+            Skipped seeding (trigger={{ trigger.id }}): state='{{ src_state }}',
+            valid={{ src_valid }}, age_cov={{ src_age_cov }}, after_06={{
+            now().strftime('%H:%M:%S') >= '06:00:00' }}.
+        action: logbook.log
+mode: single
+variables:
+  src_state: "{{ states('sensor.dai_usage_median_3d_kwh_v3') }}"
+  src_num: "{{ src_state | float(0) }}"
+  src_valid: >-
+    {{ state_attr('sensor.dai_usage_median_3d_kwh_v3','source_value_valid') |
+    default(false) }}
+  src_age_cov: >-
+    {{ state_attr('sensor.dai_usage_median_3d_kwh_v3','age_coverage_ratio') |
+    float(0) }}
+  dai_daily_median_seed: |
+    {% set v = src_num %} {{ ([v, 0, 120] | sort)[1] | round(2) }}

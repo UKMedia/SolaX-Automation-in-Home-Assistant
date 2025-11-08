@@ -1,0 +1,162 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – Cold Day Classifier v1.2
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.2 (DR005 – PARAM-ONLY):
+  Corrected met.no forecast payload indexing (['forecast'] key) for both daily
+  and hourly responses. No logic change. Design Ref: DAI + RBC HLD v1.3 (§9.3)
+  and DAI – Cold Day Classifier v1.2 (Detailed Design §2, §4). Change History:
+  v1.2 (DR005 forecast indexing fix); v1.1 (CR016 – met.no provider swap); v1.0
+  (initial release).
+triggers:
+  - id: t_0610
+    trigger: time
+    at: "06:10:00"
+  - id: t_ha_start_guarded
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: t_0610
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: t_ha_start_guarded
+                  - condition: time
+                    after: "06:00:00"
+        sequence:
+          - action: weather.get_forecasts
+            target:
+              entity_id: weather.forecast_brenchley
+            data:
+              type: daily
+            response_variable: fc_daily
+          - action: weather.get_forecasts
+            target:
+              entity_id: weather.forecast_brenchley
+            data:
+              type: hourly
+            response_variable: fc_hourly
+          - variables:
+              tomorrow: "{{ (now() + timedelta(days=1)).date() }}"
+              daily_list: |-
+                {{ (fc_daily['weather.forecast_brenchley']['forecast']
+                    if fc_daily and 'weather.forecast_brenchley' in fc_daily else []) }}
+              hourly_list: |-
+                {{ (fc_hourly['weather.forecast_brenchley']['forecast']
+                    if fc_hourly and 'weather.forecast_brenchley' in fc_hourly else []) }}
+              daily_low: |-
+                {% set lows = [] %}
+                {% for f in daily_list if f is mapping %}
+                  {% set dt = as_datetime(f.get('datetime')) %}
+                  {% if dt and dt.date() == tomorrow %}
+                    {% for k in ['templow','temperature_low','native_templow','native_temperature_low'] %}
+                      {% if f.get(k) is not none %}
+                        {% set _ = lows.append(f.get(k)|float) %}
+                      {% endif %}
+                    {% endfor %}
+                  {% endif %}
+                {% endfor %}
+                {{ (lows|min) if lows|length>0 else none }}
+              hourly_low: |-
+                {% set lows = [] %}
+                {% for f in hourly_list if f is mapping %}
+                  {% set dt = as_datetime(f.get('datetime')) %}
+                  {% if dt and dt.date() == tomorrow %}
+                    {% for k in ['temperature','native_temperature'] %}
+                      {% if f.get(k) is not none %}
+                        {% set _ = lows.append(f.get(k)|float) %}
+                      {% endif %}
+                    {% endfor %}
+                  {% endif %}
+                {% endfor %}
+                {{ (lows|min) if lows|length>0 else none }}
+              estimate_low_c: >-
+                {% if daily_low is not none %}{{ daily_low|float }} {% elif
+                hourly_low is not none %}{{ hourly_low|float }} {% else
+                %}unknown{% endif %}
+              bias_c: "{{ states('input_number.rbc_temp_bias_c') | float(0) }}"
+              threshold_c: >-
+                {{ states('input_number.dai_cold_temp_threshold_c') | float(5)
+                }}
+              adjusted_min_c: |-
+                {% if estimate_low_c != 'unknown' %}
+                  {{ (estimate_low_c | float + bias_c) | round(1) }}
+                {% else %}unknown{% endif %}
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ estimate_low_c != 'unknown' }}"
+                sequence:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.rbc_temperature_estimate_low_c
+                    data:
+                      value: "{{ estimate_low_c | float | round(1) }}"
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ adjusted_min_c != 'unknown' }}"
+                        sequence:
+                          - action: input_number.set_value
+                            target:
+                              entity_id: input_number.rbc_adjusted_min_temp_c
+                            data:
+                              value: "{{ adjusted_min_c | float }}"
+                          - action: >-
+                              input_boolean.turn_{{ 'on' if (adjusted_min_c |
+                              float(99)) <= threshold_c else 'off' }}
+                            target:
+                              entity_id: input_boolean.dai_cold_day_flag
+                          - action: input_text.set_value
+                            target:
+                              entity_id: input_text.dai_cold_day_reason
+                            data:
+                              value: >-
+                                Estimate={{ estimate_low_c | float | round(1)
+                                }}°C, Bias={{ bias_c | round(1) }}°C,
+                                Adjusted={{ adjusted_min_c }}°C, Threshold={{
+                                threshold_c }}°C → ColdDay={{ (adjusted_min_c |
+                                float(99)) <= threshold_c }}
+                          - action: logbook.log
+                            data:
+                              name: DAI – Cold Day Classifier
+                              message: >-
+                                v1.2 (DR005): Wrote tomorrow's low {{
+                                estimate_low_c | float | round(1) }}°C, Adjusted
+                                {{ adjusted_min_c }}°C; ColdDay set={{
+                                (adjusted_min_c | float(99)) <= threshold_c }}.
+                              entity_id: input_number.rbc_adjusted_min_temp_c
+                    default:
+                      - action: logbook.log
+                        data:
+                          name: DAI – Cold Day Classifier
+                          message: >-
+                            v1.2 (DR005): Estimate {{ estimate_low_c }}°C
+                            written; adjusted unknown (no bias?).
+                          entity_id: input_number.rbc_temperature_estimate_low_c
+              - conditions:
+                  - condition: template
+                    value_template: "{{ estimate_low_c == 'unknown' }}"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      name: DAI – Cold Day Classifier
+                      message: >-
+                        v1.2 (DR005): No forecast low found for {{ tomorrow }};
+                        skipped.
+                      entity_id: input_text.dai_cold_day_reason
+    default:
+      - action: logbook.log
+        data:
+          name: DAI – Cold Day Classifier
+          message: Default branch reached; no valid trigger/guard.
+          entity_id: input_text.dai_cold_day_reason
+mode: single

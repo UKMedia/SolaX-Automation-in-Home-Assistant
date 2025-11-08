@@ -1,0 +1,216 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – Energy Saving Sessions Controller v3.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v3.0: Export Boost only. On
+  calendar start, assert session override and set Feedin Priority (Master) to
+  export during the session. Enforce a hard SoC floor from
+  input_number.stop_discharge_level using the MIN of House/Garage SoC; if the
+  floor is reached, revert to Self Use but keep override ON until session end.
+  Calendar end clears override and returns to normal. Heartbeat reconciles mode,
+  floor, and missed triggers. Visual-Editor-safe.
+triggers:
+  - id: t_cal_live_start
+    trigger: calendar
+    entity_id: calendar.octopus_energy_<ACCOUNT>_octoplus_saving_session
+    event: start
+  - id: t_cal_live_end
+    trigger: calendar
+    entity_id: calendar.octopus_energy_<ACCOUNT>_octoplus_saving_session
+    event: end
+  - id: t_agent_toggle
+    trigger: state
+    entity_id: input_boolean.dai_agent_active
+  - id: t_heartbeat_5m
+    trigger: time_pattern
+    minutes: /5
+conditions:
+  - condition: state
+    entity_id: input_boolean.dai_agent_active
+    state: "on"
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_cal_live_start
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.dai_session_override_active
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ not inv_is_feedin }}"
+                sequence:
+                  - action: select.select_option
+                    target:
+                      entity_id: select.solax_house_charger_use_mode
+                    data:
+                      option: Feedin Priority Mode
+                  - wait_for_trigger:
+                      - trigger: state
+                        entity_id: select.solax_house_charger_use_mode
+                        to: Feedin Priority Mode
+                    timeout: "00:00:20"
+                    continue_on_timeout: true
+                  - delay: "00:00:05"
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.last_mode_change
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_ok }}"
+                sequence:
+                  - action: input_datetime.set_datetime
+                    target:
+                      entity_id: input_datetime.dai_last_mode_notify
+                    data:
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                  - action: notify.<your_device_name_here>
+                    data:
+                      title: Saving Session — LIVE (Export Boost)
+                      message: >
+                        Override asserted. Mode → Feedin Priority. Discharge
+                        floor = {{ stop_floor | round(0) }}%.
+      - conditions:
+          - condition: trigger
+            id: t_cal_live_end
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.dai_session_override_active
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ not inv_is_self }}"
+                sequence:
+                  - action: select.select_option
+                    target:
+                      entity_id: select.solax_house_charger_use_mode
+                    data:
+                      option: Self Use Mode
+                  - wait_for_trigger:
+                      - trigger: state
+                        entity_id: select.solax_house_charger_use_mode
+                        to: Self Use Mode
+                    timeout: "00:00:20"
+                    continue_on_timeout: true
+                  - delay: "00:00:05"
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.last_mode_change
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notify_ok }}"
+                sequence:
+                  - action: input_datetime.set_datetime
+                    target:
+                      entity_id: input_datetime.dai_last_mode_notify
+                    data:
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                  - action: notify.<your_device_name_here>
+                    data:
+                      title: Saving Session — ENDED
+                      message: >
+                        Override cleared. Mode → Self Use. Control returns to
+                        planners.
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: t_heartbeat_5m
+              - condition: trigger
+                id: t_agent_toggle
+          - condition: template
+            value_template: "{{ live_now }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ at_or_below_floor and not inv_is_self }}"
+                sequence:
+                  - action: select.select_option
+                    target:
+                      entity_id: select.solax_house_charger_use_mode
+                    data:
+                      option: Self Use Mode
+                  - wait_for_trigger:
+                      - trigger: state
+                        entity_id: select.solax_house_charger_use_mode
+                        to: Self Use Mode
+                    timeout: "00:00:20"
+                    continue_on_timeout: true
+                  - delay: "00:00:05"
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ notify_ok }}"
+                        sequence:
+                          - action: input_datetime.set_datetime
+                            target:
+                              entity_id: input_datetime.dai_last_mode_notify
+                            data:
+                              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                          - action: notify.<your_device_name_here>
+                            data:
+                              title: Saving Session — Export Paused
+                              message: >
+                                SoC floor reached ({{ soc_min | round(0) }}% ≤
+                                {{ stop_floor | round(0) }}%). Holding Self Use
+                                until session ends.
+              - conditions:
+                  - condition: template
+                    value_template: "{{ above_floor_hyst and not inv_is_feedin }}"
+                sequence:
+                  - action: select.select_option
+                    target:
+                      entity_id: select.solax_house_charger_use_mode
+                    data:
+                      option: Feedin Priority Mode
+                  - wait_for_trigger:
+                      - trigger: state
+                        entity_id: select.solax_house_charger_use_mode
+                        to: Feedin Priority Mode
+                    timeout: "00:00:20"
+                    continue_on_timeout: true
+                  - delay: "00:00:05"
+    default: []
+mode: single
+variables:
+  cal_entity: calendar.octopus_energy_<ACCOUNT>_octoplus_saving_session
+  inv_mode: "{{ states('select.solax_house_charger_use_mode') | string }}"
+  inv_mode_lc: "{{ inv_mode | lower }}"
+  inv_is_self: "{{ 'self' in inv_mode_lc }}"
+  inv_is_feedin: "{{ 'feed' in inv_mode_lc }}"
+  live_now: "{{ is_state(cal_entity,'on') }}"
+  soc_house_raw: "{{ states('sensor.solax_house_battery_capacity') }}"
+  soc_garage_raw: "{{ states('sensor.solax_garage_battery_capacity') }}"
+  soc_house: >
+    {% set v = soc_house_raw %} {{ (v | float(0)) if v not in
+    [none,'unknown','unavailable',''] else 0.0 }}
+  soc_garage: >
+    {% set v = soc_garage_raw %} {{ (v | float(0)) if v not in
+    [none,'unknown','unavailable',''] else 0.0 }}
+  soc_min: "{{ [soc_house, soc_garage] | min }}"
+  stop_floor_raw: "{{ states('input_number.stop_discharge_level') }}"
+  stop_floor: >
+    {% set v = stop_floor_raw %} {{ (v | float(20)) if v not in
+    [none,'unknown','unavailable',''] else 20.0 }}
+  hysteresis_pct: 2
+  at_or_below_floor: "{{ soc_min <= stop_floor }}"
+  above_floor_hyst: "{{ soc_min >= (stop_floor + hysteresis_pct) }}"
+  notify_gap_sec: 120
+  last_notify_str: "{{ states('input_datetime.dai_last_mode_notify') }}"
+  last_notify_ts: >
+    {% set s = last_notify_str %} {% if s in [none,'unknown','unavailable','']
+    %}0 {% else %}{{ as_timestamp(strptime(s,'%Y-%m-%d %H:%M:%S')) }}{% endif %}
+  now_ts: "{{ as_timestamp(now()) }}"
+  notify_ok: "{{ (now_ts - last_notify_ts) | float(99999) > notify_gap_sec }}"

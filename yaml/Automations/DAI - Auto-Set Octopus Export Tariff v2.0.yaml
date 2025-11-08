@@ -1,0 +1,185 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – Auto-Set Octopus Export Tariff v2.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). **Export track** of the
+  dual-tariff design. Keeps input_select.octopus_export_tariff aligned with the
+  live Octopus **export** product by reading the tariff code from the Octopus
+  integration (prefers the current-rate sensor attribute if available; falls
+  back to the *export_current_day_rates* event entity). Respects an Export
+  override toggle, avoids flapping, and logs concise reasons. Policy for unknown
+  codes: **leave helper unchanged and warn**. **No-op (already correct) events
+  are only logged when Debug is ON** to prevent noise.
+triggers:
+  - id: t_event_entity
+    trigger: state
+    entity_id: >-
+      event.octopus_energy_electricity_<ACCOUNT>_<EXPORT_METER>_export_current_day_rates
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+  - id: t_daily_check
+    trigger: time
+    at: "00:10:00"
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: input_boolean.octopus_tariff_autoset_override_export
+            state: "on"
+        sequence:
+          - action: logbook.log
+            data:
+              name: "{{ v_msg_prefix }} • Override"
+              message: >-
+                Override ON → detected code='{{ v_tariff_code or '∅' }}'
+                mapped='{{ v_mapped_label or '∅' }}' (no change applied).
+          - if:
+              - condition: state
+                entity_id: input_boolean.octopus_tariff_autoset_debug
+                state: "on"
+            then:
+              - action: notify.<your_device_name_here>
+                data:
+                  title: "{{ v_msg_prefix }} — Override active"
+                  message: >-
+                    Detected '{{ v_tariff_code or 'none' }}' → '{{
+                    v_mapped_label or 'no match' }}'. Manual override (Export)
+                    prevented changes.
+    default: []
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ (v_tariff_code | length) == 0 }}"
+        sequence:
+          - action: logbook.log
+            data:
+              name: "{{ v_msg_prefix }} • No code"
+              message: >-
+                No export tariff code available from {{ v_rate_sensor }} or {{
+                v_event_entity }}. Helper left at '{{ v_current_helper }}'.
+          - if:
+              - condition: state
+                entity_id: input_boolean.octopus_tariff_autoset_debug
+                state: "on"
+            then:
+              - action: notify.<your_device_name_here>
+                data:
+                  title: "{{ v_msg_prefix }} — No tariff code"
+                  message: >-
+                    Could not read an export tariff code; helper remains '{{
+                    v_current_helper }}'.
+    default: []
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ (v_tariff_code | length) > 0 and (v_mapped_label | length) == 0
+              }}
+        sequence:
+          - action: logbook.log
+            data:
+              name: "{{ v_msg_prefix }} • Unrecognised"
+              message: >-
+                Unrecognised export tariff code '{{ v_tariff_code }}'. Helper
+                unchanged (current='{{ v_current_helper }}'). Consider updating
+                mapping if needed.
+          - if:
+              - condition: state
+                entity_id: input_boolean.octopus_tariff_autoset_debug
+                state: "on"
+            then:
+              - action: notify.<your_device_name_here>
+                data:
+                  title: "{{ v_msg_prefix }} — Unrecognised code"
+                  message: >-
+                    Export code '{{ v_tariff_code }}' did not match known
+                    products. Helper unchanged.
+    default: []
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ v_mapped_label == v_current_helper and (v_mapped_label |
+              length) > 0 }}
+        sequence:
+          - if:
+              - condition: state
+                entity_id: input_boolean.octopus_tariff_autoset_debug
+                state: "on"
+            then:
+              - action: logbook.log
+                data:
+                  name: "{{ v_msg_prefix }} • No change"
+                  message: >-
+                    Detected '{{ v_tariff_code }}' → '{{ v_mapped_label }}'
+                    (already set). Trigger='{{ trigger.id }}'.
+              - action: notify.<your_device_name_here>
+                data:
+                  title: "{{ v_msg_prefix }} — No change"
+                  message: >-
+                    Detected '{{ v_tariff_code }}' → '{{ v_mapped_label }}'
+                    (already set).
+    default: []
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ (v_mapped_label | length) > 0 and v_mapped_label !=
+              v_current_helper }}
+        sequence:
+          - action: input_select.select_option
+            target:
+              entity_id: "{{ v_helper }}"
+            data:
+              option: "{{ v_mapped_label }}"
+          - action: logbook.log
+            data:
+              name: "{{ v_msg_prefix }} • Updated"
+              message: >-
+                Set {{ v_helper }} → '{{ v_mapped_label }}' from code '{{
+                v_tariff_code }}'. Trigger='{{ trigger.id }}'. Previous='{{
+                v_current_helper }}'.
+          - if:
+              - condition: state
+                entity_id: input_boolean.octopus_tariff_autoset_debug
+                state: "on"
+            then:
+              - action: notify.<your_device_name_here>
+                data:
+                  title: "{{ v_msg_prefix }} — {{ v_mapped_label }}"
+                  message: >-
+                    Changed from '{{ v_current_helper }}' to '{{ v_mapped_label
+                    }}' (code='{{ v_tariff_code }}').
+    default:
+      - action: logbook.log
+        data:
+          name: "{{ v_msg_prefix }} • Default"
+          message: No matching branch for trigger='{{ trigger.id }}'.
+mode: single
+variables:
+  v_helper: input_select.octopus_export_tariff
+  v_override: input_boolean.octopus_tariff_autoset_override_export
+  v_debug: input_boolean.octopus_tariff_autoset_debug
+  v_rate_sensor: >-
+    sensor.octopus_energy_electricity_<ACCOUNT>_<EXPORT_METER>_export_current_rate
+  v_event_entity: >-
+    event.octopus_energy_electricity_<ACCOUNT>_<EXPORT_METER>_export_current_day_rates
+  v_tariff_code: |-
+    {%- set code =
+          state_attr(v_rate_sensor, 'tariff_code')
+          or state_attr(v_event_entity, 'tariff')
+          or state_attr(v_event_entity, 'tariff_code')
+          or state_attr(v_event_entity, 'product_code')
+          or ''
+    -%} {{ (code|string).upper() }}
+  v_mapped_label: >-
+    {%- set c = v_tariff_code -%} {%- if 'OUTGOING' in c and 'FLUX' in c
+    -%}Outgoing Flux {%- elif 'OUTGOING' in c and ('FIX' in c or 'FIXED' in c)
+    -%}Outgoing Fixed {%- elif 'AGILE' in c and 'EXPORT' in c -%}Agile Export
+    {%- elif 'EXPORT' in c -%}Standard Export {%- else -%}{% endif %}
+  v_current_helper: "{{ states(v_helper) | default('Standard Export') }}"
+  v_msg_prefix: Tariff autoset (Export)

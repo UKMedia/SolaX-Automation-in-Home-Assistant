@@ -1,0 +1,51 @@
+alias: DAI – Daily Usage Snapshot Writer (Direct) v5.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v5.0: Direct end-of-day
+  snapshot from sensor.brenchley_total_load_today_kwh into
+  input_number.dai_daily_usage_yesterday_kwh. Runs 23:50 (pre-safety) and
+  23:59:30 (final); clamps 0–120 kWh; detailed logging. Design Reference: DAI +
+  RBC Framework v5.8 (Oct 2025).
+triggers:
+  - id: t_2350_presafety
+    trigger: time
+    at: "23:50:00"
+  - id: t_235930_final
+    trigger: time
+    at: "23:59:30"
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: t_2350_presafety
+              - condition: trigger
+                id: t_235930_final
+          - condition: template
+            value_template: |
+              {{ states('sensor.brenchley_total_load_today_kwh') not in
+                 ['unknown','unavailable','none',''] }}
+        sequence:
+          - target:
+              entity_id: input_number.dai_daily_usage_yesterday_kwh
+            data:
+              value: "{{ dai_today_total_clamped }}"
+            action: input_number.set_value
+          - data:
+              name: DAI Snapshot
+              message: >
+                Direct daily snapshot → {{ dai_today_total_clamped }} kWh
+                (raw={{ dai_today_total_raw }} kWh, trigger={{ trigger.id }}).
+            action: logbook.log
+    default:
+      - data:
+          name: DAI Snapshot
+          message: >
+            Skipped snapshot (trigger={{ trigger.id }}): state='{{
+            states('sensor.brenchley_total_load_today_kwh') }}'.
+        action: logbook.log
+mode: single
+variables:
+  dai_today_total_raw: "{{ states('sensor.brenchley_total_load_today_kwh') | float(0) }}"
+  dai_today_total_clamped: "{{ ([ dai_today_total_raw, 0, 120 ] | sort)[1] | round(2) }}"

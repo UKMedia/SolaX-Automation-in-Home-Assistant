@@ -1,0 +1,68 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+
+alias: DAI – Evening Buffer RBC Learner Orchestrator v1.4
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.4 (2025-11-07 –
+  PARAM-ONLY): Fix bad mapper reference → use
+  script.rbc_evening_bias_to_percent_mapper_v1_0 (was
+  script.rbc_bias_to_percent_mapper). v1.3 (DR004 Defect Fix) – mapper reference
+  alignment (superseded by v1.4); v1.2 (bound wrong mapper id); v1.1 (blueprint
+  alignment); v1.0 (initial orchestrator).
+triggers:
+  - id: t_1255
+    trigger: time
+    at: "12:55:00"
+  - id: t_tariff_change
+    trigger: state
+    entity_id: input_select.octopus_import_tariff
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - variables:
+      forecast_16_22: "{{ states('input_number.dai_forecast_demand_16_22_kwh') }}"
+      actual_16_22: "{{ states('sensor.dai_actual_demand_16_22_kwh') }}"
+      bias_kwh: "{{ states('input_number.rbc_evening_bias_kwh') }}"
+      cap_total_kwh_val: "{{ states('input_number.total_battery_capacity_kwh') | float(0) }}"
+      min_soc_floor_pct: "{{ states('input_number.dai_min_soc_hard_floor') | float(0) }}"
+      capacity_kwh_value: "{{ (cap_total_kwh_val - min_soc_floor_pct) | float(0) }}"
+      safety_multiplier_entity_id: input_number.dai_evening_buffer_safety_mult
+      manual_floor_pct_entity_id: input_number.dai_evening_buffer_pct
+      decay_pct_entity_id: input_number.dai_evening_buffer_decay_pct
+      bias_helper_entity_id: input_number.rbc_evening_bias_kwh
+      out_helper_pct_entity_id: input_number.dai_evening_buffer_auto_suggest_pct
+      cap_pct_value: 25
+      deadband_pct_value: 0.1
+  - choose:
+      - conditions:
+          - condition: trigger
+            id:
+              - t_1255
+              - t_tariff_change
+              - t_ha_start
+        sequence:
+          - action: script.turn_on
+            target:
+              entity_id: script.rbc_evening_bias_to_percent_mapper_v1_0
+          - action: logbook.log
+            data:
+              name: DAI – Evening Buffer RBC Learner
+              entity_id: input_text.dai_night_planner_reason
+              message: >-
+                {{ trigger.id | default('n/a') }} – Mapper invoked. Inputs:
+                F16–22={{ forecast_16_22 }} kWh, A16–22={{ actual_16_22 }} kWh,
+                Bias={{ bias_kwh }} kWh, Capacity={{ capacity_kwh_value }} kWh,
+                Floor%={{ states(manual_floor_pct_entity_id) }}, SafetyMult={{
+                states(safety_multiplier_entity_id) }}, Decay%={{
+                states(decay_pct_entity_id) }}. Output helper={{
+                out_helper_pct_entity_id }} (cap {{ cap_pct_value }} %).
+    default:
+      - action: logbook.log
+        data:
+          name: DAI – Evening Buffer RBC Learner
+          entity_id: input_text.dai_night_planner_reason
+          message: Default branch hit – no matching conditions; mapper not called.
+mode: single
