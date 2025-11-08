@@ -1,0 +1,137 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: RBC – Temperature Bias Producer v1.2 (live code)
+# Sanitised for public repo – replace <PLACEHOLDERS> with your own entity IDs before enabling writes
+# Redactions: None (entity IDs retained exactly as supplied)
+
+alias: RBC – Temperature Bias Producer v1.2
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.3 (2025-11-07 –
+  PARAM-ONLY): Provider (met.no) daily array starts at tomorrow, so replace
+  date-equality loop with direct read of next daily low → use daily[0].templow
+  (with fallbacks) for Forecast Low. v1.2 (2025-11-07 – PARAM-ONLY): Fixed
+  response parsing from weather.get_forecasts (use ['forecast'] key indexing).
+  v1.1b (CR016 – provider swap to met.no); v1.1 (bind Estimate via helper); v1.0
+  (initial Producer).
+triggers:
+  - id: t_2340
+    trigger: time
+    at: "23:40:00"
+  - id: t_ha_start_guarded
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: t_2340
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: t_ha_start_guarded
+                  - condition: time
+                    after: "23:40:00"
+        sequence:
+          - action: weather.get_forecasts
+            target:
+              entity_id: weather.forecast_brenchley
+            data:
+              type: daily
+            response_variable: fc_daily
+          - action: weather.get_forecasts
+            target:
+              entity_id: weather.forecast_brenchley
+            data:
+              type: hourly
+            response_variable: fc_hourly
+          - variables:
+              today: "{{ now().date() }}"
+              daily_list: |-
+                {{ (fc_daily['weather.forecast_brenchley']['forecast']
+                    if fc_daily and 'weather.forecast_brenchley' in fc_daily else []) }}
+              hourly_list: |-
+                {{ (fc_hourly['weather.forecast_brenchley']['forecast']
+                    if fc_hourly and 'weather.forecast_brenchley' in fc_hourly else []) }}
+              daily_low: |-
+                {% set dl = daily_list %} {% if dl|length > 0 %}
+                  {{ (dl[0].get('templow')
+                      or dl[0].get('temperature_low')
+                      or dl[0].get('native_templow')
+                      or dl[0].get('native_temperature_low')) | float }}
+                {% else %}none{% endif %}
+              hourly_low: |-
+                {% set lows = [] %}
+                {% for f in hourly_list if f is mapping %}
+                  {% set dt = as_datetime(f.get('datetime')) %}
+                  {% if dt and dt.date() == today %}
+                    {% for k in ['temperature','native_temperature'] %}
+                      {% if f.get(k) is not none %}{% set _ = lows.append(f.get(k)|float) %}{% endif %}
+                    {% endfor %}
+                  {% endif %}
+                {% endfor %}
+                {{ (lows|min) if lows|length>0 else none }}
+              forecast_low_c: >-
+                {% if daily_low is not none %}{{ daily_low|float }} {% elif
+                hourly_low is not none %}{{ hourly_low|float }} {% else
+                %}unknown{% endif %}
+              actual_min_c: |-
+                {{ states('sensor.rbc_outside_temperature_today_min_degc') |
+                   float(default=9999) }}
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ forecast_low_c != 'unknown' and actual_min_c != 9999 }}"
+                sequence:
+                  - action: input_number.set_value
+                    target:
+                      entity_id: input_number.rbc_temperature_estimate_low_c
+                    data:
+                      value: "{{ forecast_low_c | round(1) }}"
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: >-
+                              {{ states('script.rbc_update_bias_temperature') !=
+                              'unknown' }}
+                        sequence:
+                          - action: script.turn_on
+                            target:
+                              entity_id: script.rbc_update_bias_temperature
+                          - action: logbook.log
+                            data:
+                              name: RBC – Temperature Bias Producer
+                              message: >
+                                CR016 v1.1b: Wrote Estimate {{
+                                forecast_low_c|round(1) }}°C (met.no) and called
+                                blueprint via {{ trigger.id }}.
+                              entity_id: input_number.rbc_temp_bias_c
+                    default:
+                      - action: logbook.log
+                        data:
+                          name: RBC – Temperature Bias Producer
+                          message: >
+                            CR016 v1.1b: Blueprint
+                            script.rbc_update_bias_temperature not found;
+                            skipped write.
+                          entity_id: input_text.rbc_last_period_temperature
+              - conditions:
+                  - condition: template
+                    value_template: "{{ forecast_low_c == 'unknown' or actual_min_c == 9999 }}"
+                sequence:
+                  - action: logbook.log
+                    data:
+                      name: RBC – Temperature Bias Producer
+                      message: >
+                        CR016 v1.1b: Skipped (inputs unavailable). Forecast={{
+                        forecast_low_c }}, Actual={{ actual_min_c }}°C via {{
+                        trigger.id }}.
+                      entity_id: input_text.rbc_last_period_temperature
+    default:
+      - action: logbook.log
+        data:
+          name: RBC – Temperature Bias Producer
+          message: Default branch reached; no valid trigger/guard.
+          entity_id: input_text.rbc_last_period_temperature
+mode: single

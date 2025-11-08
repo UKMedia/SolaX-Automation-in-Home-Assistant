@@ -1,0 +1,93 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: RBC – Demand Daily Bias Safety Net v1.1a (live code)
+# Sanitised for public repo – replace <PLACEHOLDERS> with your own entity IDs before enabling writes
+# Redactions: None (entity IDs retained exactly as supplied)
+
+alias: RBC – Demand Daily Bias Safety Net v1.1a
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). Late-night guard at 23:55
+  for Daily Demand. If the Producer didn’t mark today as processed, compute a
+  one-shot EWMA bias update (same maths and clipping as Producer), then stamp
+  the last-period key and notify. Visual Editor safe; no event.fire. v1.1a
+  (DR004a ALIAS-ONLY) — Standardised alias to RBC/DAI naming per Guidelines
+  §3.3; no behavioural change.
+triggers:
+  - id: t_2355
+    trigger: time
+    at: "23:55:00"
+conditions: []
+actions:
+  - variables:
+      period_key: "{{ now().date() }}"
+      last_period: "{{ states('input_text.rbc_last_period_demand_daily') }}"
+      actual: "{{ states('sensor.brenchley_load_today') | float(0) }}"
+      estimate: "{{ states('input_number.dai_expected_usage_daily_kwh') | float(0) }}"
+      prior_bias: "{{ states('input_number.rbc_bias_demand_daily') | float(0) }}"
+      alpha: "{{ 1 - (0.5 ** (1/4)) }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ last_period != period_key }}"
+          - condition: template
+            value_template: "{{ estimate > 0 }}"
+        sequence:
+          - variables:
+              residual: "{{ actual - estimate }}"
+              clipped_residual: >
+                {% set r = residual %} {% if r > 30 %}30{% elif r < -30 %}-30{%
+                else %}{{ r }}{% endif %}
+              new_bias: >-
+                {{ (alpha | float) * (clipped_residual | float) + (1 - alpha |
+                float) * (prior_bias | float) }}
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.rbc_bias_demand_daily
+            data:
+              value: "{{ new_bias | round(2) }}"
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.rbc_last_period_demand_daily
+            data:
+              value: "{{ period_key }}"
+          - action: logbook.log
+            data:
+              name: RBC – Demand Daily Safety Net
+              message: >
+                Safety update applied for {{ period_key }}. Actual={{ actual }}
+                kWh, Estimate={{ estimate }} kWh, Residual={{ (actual -
+                estimate) | round(2) }} (clipped={{ clipped_residual }}), Bias
+                {{ prior_bias | round(2) }} → {{ new_bias | round(2) }}.
+              entity_id: input_number.rbc_bias_demand_daily
+          - action: notify.mobile_app_pixel9pro
+            data:
+              title: RBC Safety Net ran (Demand Daily)
+              message: >
+                Producer missed {{ period_key }}. Applied safety EWMA update.
+                New bias: {{ new_bias | round(2) }} kWh. Actual={{ actual }}
+                kWh, Est={{ estimate }} kWh.
+      - conditions:
+          - condition: template
+            value_template: "{{ last_period != period_key }}"
+          - condition: template
+            value_template: "{{ estimate <= 0 }}"
+        sequence:
+          - action: logbook.log
+            data:
+              name: RBC – Demand Daily Safety Net
+              message: >
+                Skipped: estimate not ready (<= 0) at 23:55 for {{ period_key
+                }}. No bias change.
+              entity_id: input_number.rbc_bias_demand_daily
+          - action: notify.mobile_app_pixel9pro
+            data:
+              title: RBC Safety Net skipped (Demand Daily)
+              message: >
+                Estimate not ready (<= 0) at 23:55 for {{ period_key }}.
+                Investigate Producer/Estimator.
+    default:
+      - action: logbook.log
+        data:
+          name: RBC – Demand Daily Safety Net
+          message: "No action: already processed for {{ period_key }}."
+          entity_id: input_text.rbc_last_period_demand_daily
+mode: single

@@ -1,0 +1,203 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: RBC — Update Bias (Robust EWMA) • Script Blueprint v1.5 (live code)
+# Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
+# Redactions: None (generic blueprint; no system-specific entities hardcoded)
+
+blueprint:
+  name: RBC — Update Bias (Robust EWMA) • Script Blueprint v1.5
+  description: >
+    Code created/updated by ChatGPT (GPT-5 Thinking).
+    Reusable bias updater that applies a robust EWMA to (ACTUAL − ESTIMATE),
+    caps the result, rounds to **2 decimals**, and writes to an input_number.
+    Idempotent via an input_text storing the last processed period key (today's date).
+    Tunables: half-life (days), clip ratio, max |bias|, require-nonzero, log level.
+  domain: script
+  input:
+    actual_entity:
+      name: Actual total (entity)
+      selector:
+        entity: {}
+    estimate_entity:
+      name: Estimate total (entity)
+      selector:
+        entity: {}
+    bias_helper:
+      name: Bias helper (input_number)
+      selector:
+        entity:
+          domain: input_number
+    last_period_text:
+      name: Last processed period (input_text)
+      selector:
+        entity:
+          domain: input_text
+
+    # Optional tuning
+    half_life_days:
+      name: Half-life (days)
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          mode: slider
+    clip_ratio:
+      name: Error clip ratio (× estimate; min 0.5 abs)
+      default: 0.5
+      selector:
+        number:
+          min: 0.1
+          max: 2
+          step: 0.1
+          mode: slider
+    max_abs_bias:
+      name: Max absolute bias
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 200
+          step: 1
+          mode: slider
+    require_nonzero:
+      name: Require non-zero inputs to update
+      default: true
+      selector:
+        boolean: {}
+    log_level:
+      name: Log level
+      default: normal
+      selector:
+        select:
+          options: [quiet, normal, verbose]
+
+mode: single
+
+# ----- Bind inputs to plain variables (NO templates here) -----
+variables:
+  v_actual_entity: !input actual_entity
+  v_estimate_entity: !input estimate_entity
+  v_bias_helper: !input bias_helper
+  v_last_period_text: !input last_period_text
+
+  v_half_life_days: !input half_life_days
+  v_clip_ratio: !input clip_ratio
+  v_max_abs_bias: !input max_abs_bias
+  v_require_nonzero: !input require_nonzero
+  v_log_level: !input log_level
+
+  # Period key = today's date (string)
+  period_key: "{{ now().date() | string }}"
+
+  # Resolve current state values safely
+  _actual_raw: "{{ states(v_actual_entity) }}"
+  _estimate_raw: "{{ states(v_estimate_entity) }}"
+  y: >-
+    {% set v = _actual_raw %}
+    {{ v | float(0) if v not in ['unknown','unavailable','none','', None] else 0 }}
+  yhat: >-
+    {% set v = _estimate_raw %}
+    {{ v | float(0) if v not in ['unknown','unavailable','none','', None] else 0 }}
+  b_prev: "{{ states(v_bias_helper) | float(0) }}"
+  last_key: "{{ states(v_last_period_text) | string }}"
+
+  # Smoothing factor from half-life
+  _hl: "{{ (v_half_life_days | int(4)) if (v_half_life_days | int(0)) > 0 else 4 }}"
+  lam: "{{ 1 - (0.5 ** (1 / (_hl | float(4)))) }}"
+
+  # Robust clipping
+  _clip_ratio: "{{ v_clip_ratio | float(0.5) }}"
+  clip_abs: >-
+    {% set est = yhat | float(0) %}
+    {% set c = (est * (_clip_ratio | float(0.5))) | float(0) %}
+    {{ [0.5, c] | max }}
+
+  e: "{{ (y - yhat) | float(0) }}"
+  e_star: >-
+    {% set c = clip_abs | float(1) %}
+    {% set ee = e | float(0) %}
+    {% if ee >  c %}{{  c }}
+    {% elif ee < -c %}{{ -c }}
+    {% else %}{{ ee }}{% endif %}
+
+  # EWMA update → cap → ROUND(2)
+  b_raw: "{{ (lam | float(0)) * (e_star | float(0)) + (1 - (lam | float(0))) * (b_prev | float(0)) }}"
+  _max_abs: "{{ v_max_abs_bias | float(60) }}"
+  b_capped: >-
+    {% set v = b_raw | float(0) %}
+    {% if v >  _max_abs %}{{  _max_abs }}
+    {% elif v < -_max_abs %}{{ -_max_abs }}
+    {% else %}{{ v }}{% endif %}
+  b_new: "{{ b_capped | float(0) | round(2) }}"
+  # Guards
+  already_done: "{{ last_key == period_key }}"
+  inputs_unavailable: >-
+    {{ _actual_raw in ['unknown','unavailable','none','', None]
+       or _estimate_raw in ['unknown','unavailable','none','', None] }}
+  both_zero: "{{ (y | float(0)) == 0 and (yhat | float(0)) == 0 }}"
+
+sequence:
+  # 1) Skip if already processed
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ already_done }}"
+        sequence:
+          - condition: template
+            value_template: "{{ v_log_level != 'quiet' }}"
+          - action: logbook.log
+            data:
+              name: RBC Bias Updater
+              message: "Skipped: already processed period {{ period_key }}."
+              entity_id: "{{ v_bias_helper }}"
+
+      # 2) Skip if inputs unavailable
+      - conditions:
+          - condition: template
+            value_template: "{{ inputs_unavailable }}"
+        sequence:
+          - condition: template
+            value_template: "{{ v_log_level == 'verbose' }}"
+          - action: logbook.log
+            data:
+              name: RBC Bias Updater
+              message: "Skipped: inputs unavailable (actual='{{ _actual_raw }}', estimate='{{ _estimate_raw }}')."
+              entity_id: "{{ v_bias_helper }}"
+
+      # 3) Skip if both zero and require_nonzero
+      - conditions:
+          - condition: template
+            value_template: "{{ v_require_nonzero and both_zero }}"
+        sequence:
+          - condition: template
+            value_template: "{{ v_log_level != 'quiet' }}"
+          - action: logbook.log
+            data:
+              name: RBC Bias Updater
+              message: "No update: both actual and estimate are 0 (period {{ period_key }})."
+              entity_id: "{{ v_bias_helper }}"
+
+    # 4) Default → perform update
+    default:
+      - action: input_number.set_value
+        target:
+          entity_id: "{{ v_bias_helper }}"
+        data:
+          value: "{{ b_new }}"
+      - action: input_text.set_value
+        target:
+          entity_id: "{{ v_last_period_text }}"
+        data:
+          value: "{{ period_key }}"
+      - condition: template
+        value_template: "{{ v_log_level in ['normal','verbose'] }}"
+      - action: logbook.log
+        data:
+          name: RBC Bias Updater
+          message: >
+            Updated bias for {{ period_key }} → {{ b_new }}.
+            y={{ y | round(2) }}, ŷ={{ yhat | round(2) }},
+            e={{ e | round(2) }}, e*={{ e_star | round(2) }},
+            λ={{ lam | round(4) }}, prior={{ b_prev | round(2) }}.
+          entity_id: "{{ v_bias_helper }}"

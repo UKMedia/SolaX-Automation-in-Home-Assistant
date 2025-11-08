@@ -1,0 +1,19 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: Solcast_update 4 hours (live code)
+# Sanitised for public repo – replace <PLACEHOLDERS> with your own Solcast integration or entity IDs if required
+# Redactions: None (fully generic; no sensitive entities present)
+
+alias: Solcast_update 4 hours
+description: New API call Solcast
+triggers:
+  - hours: /4
+    trigger: time_pattern
+conditions:
+  - condition: sun
+    after: sunrise
+    before: sunset
+actions:
+  - delay:
+      seconds: "{{ range(30, 360) | random | int }}"
+  - action: solcast_solar.update_forecasts
+mode: single

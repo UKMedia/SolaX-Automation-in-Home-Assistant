@@ -1,0 +1,71 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: RBC – Evening Bias Safety Net v1.0 (live code)
+# Sanitised for public repo – replace <PLACEHOLDERS> with your own entity IDs before enabling writes
+# Redactions: None (entity IDs and helper names kept exactly as supplied)
+
+alias: RBC – Evening Bias Safety Net v1.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.0 (DR004a – New
+  Automation). Provides a 23:55 fallback for the Evening (16–22) RBC domain. If
+  the Producer didn’t stamp today, this Safety Net invokes the single-script RBC
+  Update Bias (Evening) blueprint instance, then calls the Evening Bias→Percent
+  Mapper to publish the Auto-Suggest %. Logs and notifies the Pixel 9 Pro.
+  Design Ref: DAI + RBC High-Level Design v1.1 (§5.2.3, §5.6.3). Change History:
+  v1.0 (DR004a – add Evening Safety Net at 23:55; call mapper).
+triggers:
+  - id: t_2355
+    trigger: time
+    at: "23:55:00"
+conditions: []
+actions:
+  - variables:
+      today_key: "{{ now().date() }}"
+      last_period_evening: "{{ states('input_text.rbc_last_period_evening_demand') }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ last_period_evening != today_key }}"
+        sequence:
+          - target:
+              entity_id: script.rbc_update_bias_evening
+            action: script.turn_on
+          - delay:
+              hours: 0
+              minutes: 0
+              seconds: 5
+          - target: {}
+            data:
+              name: RBC – Evening Bias Safety Net
+              message: >
+                Safety Net invoked RBC Update Bias (Evening) for {{ today_key
+                }}. Proceeding to call Mapper to publish Auto-Suggest %.
+              entity_id: input_number.rbc_evening_bias_kwh
+            action: logbook.log
+          - target:
+              entity_id: script.rbc_evening_bias_to_percent_mapper_v1_0
+            action: script.turn_on
+          - data:
+              title: RBC Safety Net ran (Evening 16–22)
+              message: >
+                Producer missed {{ today_key }}. Safety Net applied and Mapper
+                called. Check helpers rbc_evening_bias_kwh /
+                dai_evening_buffer_auto_suggest_pct.
+            action: notify.mobile_app_pixel9pro
+      - conditions:
+          - condition: template
+            value_template: "{{ last_period_evening == today_key }}"
+        sequence:
+          - target: {}
+            data:
+              name: RBC – Evening Bias Safety Net
+              message: "No action: already processed for {{ today_key }}."
+              entity_id: input_text.rbc_last_period_evening_demand
+            action: logbook.log
+    default:
+      - target: {}
+        data:
+          name: RBC – Evening Bias Safety Net
+          message: Default branch hit for {{ today_key }}; no changes made.
+          entity_id: input_text.rbc_last_period_evening_demand
+        action: logbook.log
+mode: single

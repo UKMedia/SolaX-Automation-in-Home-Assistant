@@ -1,0 +1,39 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: RBC – Evening Bias to Percent Mapper Scheduler v1.0 (live code)
+# Sanitised for public repo – replace <PLACEHOLDERS> with your own entity IDs before enabling writes
+# Redactions: None (entity IDs and helper names retained as supplied)
+
+alias: RBC – Evening Bias to Percent Mapper Scheduler v1.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.0 (DR004a – New
+  Automation). Calls the Evening Bias→Percent Mapper script daily at 12:55 to
+  publish/refresh the Auto-Suggest %. Design Ref: DAI + RBC High-Level Design
+  v1.1 (§5.2.3, §5.6.3). Change History: v1.0 (initial release).
+triggers:
+  - id: t_1255
+    trigger: time
+    at: "12:55:00"
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_1255
+        sequence:
+          - target:
+              entity_id: script.rbc_evening_bias_to_percent_mapper_v1_0
+            action: script.turn_on
+          - target: {}
+            data:
+              name: RBC – Evening Bias to Percent Mapper Scheduler
+              message: Invoked mapper at 12:55 for {{ now().date() }}.
+              entity_id: input_number.dai_evening_buffer_auto_suggest_pct
+            action: logbook.log
+    default:
+      - target: {}
+        data:
+          name: RBC – Evening Bias to Percent Mapper Scheduler
+          message: Default branch hit; no action taken.
+          entity_id: input_number.dai_evening_buffer_auto_suggest_pct
+        action: logbook.log
+mode: single

@@ -1,0 +1,60 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: RBC – PV Bias Producer v5.0 (live code)
+# Sanitised for public repo – replace <PLACEHOLDERS> with your own entity IDs before enabling writes
+# Redactions: None (entity IDs retained as supplied)
+
+alias: RBC – PV Bias Producer v5.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v5.0: schedule PV Daily bias
+  update at 23:40 and delegate computation to blueprint script
+  (script.rbc_update_bias_pv_daily) for robust RBC learning. Adds HA-start
+  catch-up if today's period wasn't stamped. Visual-Editor-safe; helpers only.
+triggers:
+  - id: t_2340
+    trigger: time
+    at: "23:40:00"
+  - id: t_ha_start
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_2340
+        sequence:
+          - target:
+              entity_id: script.rbc_update_bias_pv_daily
+            action: script.turn_on
+          - data:
+              name: RBC – PV Bias Producer
+              message: Triggered nightly PV Daily bias update for {{ today_str }}.
+              entity_id: input_number.rbc_bias_pv_daily
+            action: logbook.log
+      - conditions:
+          - condition: trigger
+            id: t_ha_start
+          - condition: template
+            value_template: "{{ not already_done_today }}"
+        sequence:
+          - target:
+              entity_id: script.rbc_update_bias_pv_daily
+            action: script.turn_on
+          - data:
+              name: RBC – PV Bias Producer
+              message: Catch-up run on HA start (no stamp for {{ today_str }}).
+              entity_id: input_number.rbc_bias_pv_daily
+            action: logbook.log
+    default:
+      - data:
+          name: RBC – PV Bias Producer
+          message: >
+            Skipped: already stamped for {{ last_period }}; Trigger={{
+            trigger.id | default('unknown') }}.
+          entity_id: input_number.rbc_bias_pv_daily
+        action: logbook.log
+mode: single
+variables:
+  today_str: "{{ now().date() | string }}"
+  last_period: "{{ states('input_text.rbc_last_period_pv') | string }}"
+  already_done_today: "{{ last_period == today_str }}"

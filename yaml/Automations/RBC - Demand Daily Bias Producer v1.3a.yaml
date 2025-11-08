@@ -1,0 +1,40 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: RBC - Demand Daily Bias Producer v1.3a (live code)
+# Sanitised for public repo – replace <PLACEHOLDERS> with your own entity IDs before enabling writes
+# Redactions: None (entity IDs retained as supplied)
+
+alias: RBC - Demand Daily Bias Producer v1.3a
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). Schedules the **Demand Daily
+  bias** update once per day (23:40) by calling the blueprint-based script
+  `script.rbc_update_bias_demand_daily`.  Visual-Editor-safe with inline
+  comments. v1.3a (DR004a ALIAS-ONLY) — Standardised alias to RBC/DAI naming
+  per  Guidelines §3.3; no behavioural change.
+triggers:
+  - id: t_2340
+    trigger: time
+    at: "23:40:00"
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: t_2340
+        sequence:
+          - action: script.turn_on
+            target:
+              entity_id: script.rbc_update_bias_demand_daily
+          - action: logbook.log
+            data:
+              name: RBC – Demand Daily Bias Producer
+              message: Triggered Demand Daily bias update for {{ now().date() }}.
+              entity_id: input_number.rbc_bias_demand_daily
+    default:
+      - action: logbook.log
+        data:
+          name: RBC – Demand Daily Bias Producer
+          message: >-
+            No matching trigger branch; nothing executed. Trigger={{ trigger.id
+            | default('unknown') }}
+          entity_id: input_number.rbc_bias_demand_daily
+mode: single

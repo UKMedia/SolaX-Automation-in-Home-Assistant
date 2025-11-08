@@ -1,0 +1,33 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: RBC – PV Bias Safety Net v1.3 (live code)
+# Sanitised for public repo – replace <PLACEHOLDERS> with your own entity IDs before enabling writes
+# Redactions: None (entity IDs retained exactly as supplied)
+
+alias: RBC – PV Bias Safety Net v1.3
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). Safety-net: if today's PV
+  bias hasn't been updated by producers, call the RBC PV updater once at 23:55.
+  Uses logbook.log for structured logging (no event.fire).
+triggers:
+  - id: t_2355
+    trigger: time
+    at: "23:55:00"
+conditions:
+  - condition: template
+    value_template: "{{ states('input_text.rbc_last_period_pv') != now().date()|string }}"
+actions:
+  - target:
+      entity_id: script.rbc_update_bias_pv_daily
+    action: script.turn_on
+  - data:
+      name: RBC PV Safety Net
+      message: Invoked PV updater at 23:55 for period {{ now().date() }}.
+      entity_id: input_number.rbc_bias_pv_daily
+    action: logbook.log
+  - data:
+      title: RBC Safety Net (PV)
+      message: >
+        PV bias update was missing, so the safety net ran at 23:55 for {{
+        now().date() }}. Check producers if this happens frequently.
+    action: notify.mobile_app_pixel_9_pro
+mode: single

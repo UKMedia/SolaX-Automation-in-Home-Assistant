@@ -1,0 +1,158 @@
+# Code created/updated by ChatGPT (GPT-5 Thinking)
+# Source: RBC – Temperature Bias Safety Net v1.0 (live code)
+# Sanitised for public repo – replace <PLACEHOLDERS> with your own entity IDs before enabling writes
+# Redactions: None (entities retained exactly as supplied)
+
+alias: RBC – Temperature Bias Safety Net v1.0
+description: >
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.1 (2025-11-07 –
+  PARAM-ONLY): Provider daily array begins at tomorrow; replaced date-equality
+  loop with direct read of next daily low (daily[0].templow) for Forecast Low to
+  align with Producer v1.3. v1.0 (DR004a – RBC Alignment): 23:55 fallback for
+  Temperature domain. If today's stamp is missing, compute Forecast Low
+  (daily→hourly), write Estimate helper, then call the RBC Update Bias blueprint
+  instance to update input_number.rbc_temp_bias_c and stamp
+  input_text.rbc_last_period_temperature. Visual-Editor-safe.
+triggers:
+  - id: t_2355
+    trigger: time
+    at: "23:55:00"
+  - id: t_ha_start_guarded
+    trigger: homeassistant
+    event: start
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: t_2355
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: t_ha_start_guarded
+                  - condition: time
+                    after: "23:55:00"
+        sequence:
+          - variables:
+              today_key: "{{ now().date() | string }}"
+              stamped: >-
+                {% set s = states('input_text.rbc_last_period_temperature') %}
+                {{ s is string and s == today_key }}
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ not stamped }}"
+                sequence:
+                  - target:
+                      entity_id: weather.met_office_monmouth
+                    data:
+                      type: daily
+                    response_variable: fc_daily
+                    action: weather.get_forecasts
+                  - target:
+                      entity_id: weather.met_office_monmouth
+                    data:
+                      type: hourly
+                    response_variable: fc_hourly
+                    action: weather.get_forecasts
+                  - variables:
+                      today: "{{ now().date() }}"
+                      daily_list: >-
+                        {{ (fc_daily['weather.met_office_monmouth']['forecast']
+                        if fc_daily and 'weather.met_office_monmouth' in
+                        fc_daily else []) }}
+                      hourly_list: >-
+                        {{ (fc_hourly['weather.met_office_monmouth']['forecast']
+                        if fc_hourly and 'weather.met_office_monmouth' in
+                        fc_hourly else []) }}
+                      daily_low: |-
+                        {% set dl = daily_list %} {% if dl|length > 0 %}
+                          {{ (dl[0].get('templow')
+                              or dl[0].get('temperature_low')
+                              or dl[0].get('native_templow')
+                              or dl[0].get('native_temperature_low')) | float }}
+                        {% else %}none{% endif %}
+                      hourly_low: >-
+                        {% set lows = [] %} {% for f in hourly_list if f is
+                        mapping %}
+                          {% set dt = as_datetime(f.get('datetime')) %}
+                          {% if dt and dt.date() == today %}
+                            {% for k in ['temperature','native_temperature'] %}
+                              {% if f.get(k) is not none %}{% set _ = lows.append(f.get(k)|float) %}{% endif %}
+                            {% endfor %}
+                          {% endif %}
+                        {% endfor %} {{ (lows|min) if lows|length>0 else none }}
+                      forecast_low_c: >-
+                        {% if daily_low is not none %}{{ daily_low|float }} {%
+                        elif hourly_low is not none %}{{ hourly_low|float }} {%
+                        else %}unknown{% endif %}
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ forecast_low_c != 'unknown' }}"
+                        sequence:
+                          - target:
+                              entity_id: input_number.rbc_temperature_estimate_low_c
+                            data:
+                              value: "{{ forecast_low_c | round(1) }}"
+                            action: input_number.set_value
+                          - choose:
+                              - conditions:
+                                  - condition: template
+                                    value_template: >-
+                                      {{
+                                      states('script.rbc_update_bias_temperature')
+                                      != 'unknown' }}
+                                sequence:
+                                  - target:
+                                      entity_id: script.rbc_update_bias_temperature
+                                    action: script.turn_on
+                                  - data:
+                                      name: RBC – Temperature Bias Safety Net
+                                      message: >-
+                                        DR004a: Safety Net executed via {{
+                                        trigger.id }}; Estimate {{
+                                        forecast_low_c|round(1) }}°C written and
+                                        blueprint called.
+                                      entity_id: input_number.rbc_temp_bias_c
+                                    action: logbook.log
+                            default:
+                              - data:
+                                  name: RBC – Temperature Bias Safety Net
+                                  message: >-
+                                    DR004a: Blueprint
+                                    script.rbc_update_bias_temperature not
+                                    found; skipped.
+                                  entity_id: input_text.rbc_last_period_temperature
+                                action: logbook.log
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ forecast_low_c == 'unknown' }}"
+                        sequence:
+                          - data:
+                              name: RBC – Temperature Bias Safety Net
+                              message: >-
+                                DR004a: Skipped (forecast unavailable) via {{
+                                trigger.id }}.
+                              entity_id: input_text.rbc_last_period_temperature
+                            action: logbook.log
+              - conditions:
+                  - condition: template
+                    value_template: "{{ stamped }}"
+                sequence:
+                  - data:
+                      name: RBC – Temperature Bias Safety Net
+                      message: >-
+                        DR004a: Already stamped today (no action) via {{
+                        trigger.id }}.
+                      entity_id: input_text.rbc_last_period_temperature
+                    action: logbook.log
+    default:
+      - data:
+          name: RBC – Temperature Bias Safety Net
+          message: "DR004a: Default branch reached; no valid trigger or guard."
+          entity_id: input_text.rbc_last_period_temperature
+        action: logbook.log
+mode: single
