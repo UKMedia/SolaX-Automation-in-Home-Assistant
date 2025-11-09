@@ -6,6 +6,7 @@ It focuses on *how to run a multi-automation energy stack safely and predictably
 > This repository is a **reference implementation**.  
 > Your entity names and helper IDs will differ; adapt them using the included templates and ChatGPT prompts.
 
+The attached yaml code is fully functional, you just need to create the Helpers and check the Entity mapping.
 Please refer to the Docs section for Installation instructions
 
 ---
