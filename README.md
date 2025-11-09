@@ -102,6 +102,35 @@ All actions are logged and traceable through HA Traces and the Logbook.
 
 ---
 
+## 🧩 Helpers & Entities Reference Map
+
+**File:** [`Helper and Entity List.md`](Helper and Entity List.md)  
+**Scope:** DAI + RBC Home Assistant Integration (Brenchley System)
+
+This file provides the authoritative mapping between:
+- **UI Helpers** (`input_number`, `input_boolean`, `input_select`, `input_text`, `input_datetime`)  
+- **Device Entities** (`sensor`, `select`, `climate`, `number`, etc.)
+
+### 📘 Purpose
+To maintain a single, version-controlled record of every helper and entity used in the DAI/RBC automation and dashboard layers.  
+Each automation or dashboard YAML references this file in its `description:` block for traceability.
+
+### 📑 Structure
+| Section | Contents |
+|----------|-----------|
+| **1️⃣ Helpers Map – Template** | Blank table for defining new helpers (UI-created only). |
+| **2️⃣ Entities Map – Template** | Blank table for defining non-helper entities. |
+| **3️⃣ Helpers Map – Pre-Populated** | All currently deployed helpers (DAI, RBC, Octopus). |
+| **4️⃣ Entities Map – Pre-Populated** | Active sensors, selects, and devices in use. |
+| **5️⃣ Notes** | Governance rules for creating, editing, and referencing entities. |
+
+### 🧭 Usage in YAML
+All automation and dashboard configurations should include:
+```yaml
+# Ref: helpers_entities_map.md (Nov 2025)
+
+---
+
 ## 🧭 Design Principles
 - **One automation = one responsibility**  
 - **Helpers store state** (no hidden logic)  
