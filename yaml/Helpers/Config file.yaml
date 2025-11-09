@@ -1,0 +1,453 @@
+# =========================
+# DAI / RBC – Helpers Pack
+# Version: v1.0 (Nov 2025)
+# Description: Quick-create all helpers used by the DAI + RBC dashboards and automations.
+# Safe to paste into configuration.yaml (or split into packages/).
+# =========================
+
+input_boolean:
+  detailed_view:
+    name: Detailed View (Dashboard)
+    icon: mdi:details
+    initial: off
+
+  dai_cold_day_flag:
+    name: DAI Cold Day Flag
+    icon: mdi:snowflake
+    initial: off
+
+  dai_evening_buffer_auto:
+    name: Evening Buffer Auto
+    icon: mdi:autorenew
+    initial: on
+
+  dai_agent_active:
+    name: DAI Agent Active (Anti-Clipping)
+    icon: mdi:robot
+    initial: on
+
+  dai_session_override_active:
+    name: Session / Manual Override (Tomorrow)
+    icon: mdi:hand-back-right
+    initial: off
+
+  dai_debug_night_planner:
+    name: Debug Mode (Grid Planner)
+    icon: mdi:bug-check
+    initial: off
+
+  octopus_tariff_autoset_override_import:
+    name: Octopus Autoset Override (Import)
+    icon: mdi:transit-connection-variant
+    initial: off
+
+  octopus_tariff_autoset_override_export:
+    name: Octopus Autoset Override (Export)
+    icon: mdi:transit-connection-variant
+    initial: off
+
+  octopus_tariff_autoset_debug:
+    name: Octopus Autoset Debug
+    icon: mdi:bug
+    initial: off
+
+  tariff_desync_soft_pause:
+    name: Tariff Desync Soft Pause
+    icon: mdi:pause-octagon
+    initial: off
+
+  show_helper:
+    name: Show Helper Notes
+    icon: mdi:help-box
+    initial: off
+
+input_number:
+  # --- Temperature / Cold-day ---
+  rbc_temperature_estimate_low_c:
+    name: RBC Temperature Estimate Low (°C)
+    min: -20
+    max: 25
+    step: 0.1
+    unit_of_measurement: "°C"
+    mode: box
+    icon: mdi:thermometer-chevron-down
+
+  rbc_temp_bias_c:
+    name: RBC Temperature Bias (°C)
+    min: -10
+    max: 10
+    step: 0.1
+    unit_of_measurement: "°C"
+    mode: box
+    icon: mdi:tune-variant
+
+  rbc_adjusted_min_temp_c:
+    name: RBC Adjusted Min (°C)
+    min: -20
+    max: 25
+    step: 0.1
+    unit_of_measurement: "°C"
+    mode: box
+    icon: mdi:thermometer-auto
+
+  dai_cold_temp_threshold_c:
+    name: Cold Temperature Threshold (°C)
+    min: -10
+    max: 10
+    step: 0.1
+    unit_of_measurement: "°C"
+    mode: slider
+    icon: mdi:snowflake-alert
+    initial: 3.0
+
+  # --- Solar forecast thresholds (as per user convention) ---
+  full_sun_solar_forecast:
+    name: Full Sun Threshold (kWh)
+    min: 0
+    max: 60
+    step: 0.5
+    unit_of_measurement: "kWh"
+    mode: slider
+    icon: mdi:white-balance-sunny
+
+  partitial_sun_solar_forecast:
+    name: Partial Sun Threshold (kWh)
+    min: 0
+    max: 60
+    step: 0.5
+    unit_of_measurement: "kWh"
+    mode: slider
+    icon: mdi:weather-partly-cloudy
+
+  # --- RBC core: biases & adjusted values ---
+  rbc_bias_pv_daily:
+    name: RBC Bias – PV Daily (kWh)
+    min: -20
+    max: 20
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:chart-line
+
+  rbc_bias_demand_08_16:
+    name: RBC Bias – Demand 08–16 (kWh)
+    min: -20
+    max: 20
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:chart-line
+
+  rbc_bias_demand_daily:
+    name: RBC Bias – Demand Daily (kWh)
+    min: -40
+    max: 40
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:chart-line
+
+  rbc_adjusted_pv_daily_kwh:
+    name: RBC Adjusted – PV Daily (kWh)
+    min: 0
+    max: 80
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:solar-power
+
+  rbc_adjusted_demand_daily_kwh:
+    name: RBC Adjusted – Demand Daily (kWh)
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:home-lightning-bolt
+
+  rbc_adjusted_demand_08_16_kwh:
+    name: RBC Adjusted – Demand 08–16 (kWh)
+    min: 0
+    max: 60
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:timeline-clock
+
+  rbc_adjusted_demand_next_horizon_kwh:
+    name: RBC Adjusted – Next Horizon (kWh)
+    min: 0
+    max: 60
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:timeline-clock-outline
+
+  # --- Evening Buffer domain ---
+  dai_evening_buffer_pct:
+    name: Evening Buffer (Manual %)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: slider
+    icon: mdi:battery-medium
+    initial: 55
+
+  dai_evening_buffer_auto_suggest_pct:
+    name: Evening Buffer (Auto Suggest %)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    icon: mdi:percent-outline
+
+  rbc_evening_bias_kwh:
+    name: RBC Evening Bias (kWh)
+    min: -20
+    max: 20
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:chart-ppf
+
+  dai_forecast_demand_16_22_kwh:
+    name: Forecast Demand 16–22 (kWh)
+    min: 0
+    max: 40
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:clock-end
+
+  # --- Anti-clipping & planner controls ---
+  dai_pv_surplus_threshold_w:
+    name: PV Surplus Threshold (W)
+    min: 0
+    max: 5000
+    step: 50
+    unit_of_measurement: "W"
+    icon: mdi:solar-panel
+
+  dai_hysteresis_min:
+    name: Hysteresis (min)
+    min: 0
+    max: 60
+    step: 1
+    unit_of_measurement: "min"
+    icon: mdi:timer-cog
+
+  dai_min_soc_hard_floor:
+    name: Reserve SoC Floor (%)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-minus
+
+  dai_feedin_stop_soc:
+    name: Feed-in Stop SoC (%)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-remove
+
+  dai_usage_margin_kwh:
+    name: Demand Delta (±kWh)
+    min: -10
+    max: 10
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:delta
+
+  dai_forecast_bias:
+    name: Forecast Bias (Anti-Clipping)
+    min: -10
+    max: 10
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:target-variant
+
+  dai_usage_baseline_flux:
+    name: Baseline Daily Usage (Flux, kWh)
+    min: 0
+    max: 60
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:home-lightning-bolt
+
+  total_battery_capacity_kwh:
+    name: Total Battery Capacity (kWh)
+    min: 5
+    max: 50
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:battery-heart
+
+  dai_min_soc_floor_cosy:
+    name: Min SoC Floor — Cosy (%)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-check
+
+  dai_min_soc_floor_flux:
+    name: Min SoC Floor — Flux (%)
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-check-outline
+
+  dai_soc_buffer_pct:
+    name: Constant Buffer (%)
+    min: 0
+    max: 50
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:buffer
+
+  dai_variance_correction_pct:
+    name: Variance Correction (%)
+    min: -50
+    max: 50
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:chart-bell-curve
+
+  dai_usage_seasonal_multiplier:
+    name: Seasonal Usage Factor (×)
+    min: 0.2
+    max: 3.0
+    step: 0.05
+    unit_of_measurement: "x"
+    icon: mdi:account-clock
+
+  tariff_desync_warn_minutes:
+    name: Tariff Desync Warn (min)
+    min: 0
+    max: 360
+    step: 5
+    unit_of_measurement: "min"
+    icon: mdi:alarm-light
+
+  tariff_desync_halt_minutes:
+    name: Tariff Desync Halt (min)
+    min: 0
+    max: 360
+    step: 5
+    unit_of_measurement: "min"
+    icon: mdi:alarm-light-off
+
+  # --- Daily demand estimator seed (optional but referenced in docs) ---
+  dai_expected_usage_daily_kwh:
+    name: Expected Usage Daily (kWh)
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: "kWh"
+    icon: mdi:home-lightning-bolt-outline
+
+input_text:
+  dai_cold_day_reason:
+    name: Cold Day – Reason
+    max: 255
+    icon: mdi:note-text
+
+  dai_night_planner_reason:
+    name: Grid Charge Planner – Reason Log
+    max: 4096
+    icon: mdi:note-text-outline
+
+  rbc_horizon_log:
+    name: RBC Horizon Log
+    max: 4096
+    icon: mdi:timeline
+
+  rbc_last_period_evening_demand:
+    name: RBC Last Period Key (Evening)
+    max: 128
+    icon: mdi:calendar-check
+
+  rbc_last_period_temperature:
+    name: RBC Last Stamp (Temperature)
+    max: 128
+    icon: mdi:calendar-check-outline
+
+input_select:
+  octopus_tariff_d:
+    name: Octopus Tariff (Display)
+    options:
+      - Cosy
+      - Flux
+      - Agile
+      - Fixed
+    icon: mdi:swap-horizontal-bold
+
+  free_energy_session_today:
+    name: Free Energy Session (Today)
+    options:
+      - Off
+      - Morning
+      - Afternoon
+      - Evening
+      - All Day
+    icon: mdi:battery-arrow-up-outline
+
+  octopus_import_tariff:
+    name: Octopus Import Tariff
+    options:
+      - Cosy
+      - Agile
+      - Fixed
+      - Flux
+    icon: mdi:transmission-tower
+
+  octopus_export_tariff:
+    name: Octopus Export Tariff
+    options:
+      - Outgoing Flux
+      - Outgoing Fixed
+      - Agile Export
+      - SEG
+    icon: mdi:transmission-tower-export
+
+  dai_actual_demand_16_22_kwh:
+    name: Actual Demand 16–22 (kWh)
+    options:
+      - Unknown
+      - <5
+      - 5–8
+      - 8–12
+      - 12–16
+      - 16+
+    icon: mdi:clock-outline
+
+input_datetime:
+  dai_cosy_morning_start:
+    name: Cosy Morning Start
+    has_date: false
+    has_time: true
+  dai_cosy_morning_end:
+    name: Cosy Morning End
+    has_date: false
+    has_time: true
+  dai_cosy_afternoon_start:
+    name: Cosy Afternoon Start
+    has_date: false
+    has_time: true
+  dai_cosy_afternoon_end:
+    name: Cosy Afternoon End
+    has_date: false
+    has_time: true
+  dai_cosy_overnight_start:
+    name: Cosy Overnight Start
+    has_date: false
+    has_time: true
+  dai_cosy_overnight_end:
+    name: Cosy Overnight End
+    has_date: false
+    has_time: true
+
+  dai_flux_overnight_start:
+    name: Flux Cheap Period Start
+    has_date: false
+    has_time: true
+  dai_flux_overnight_end:
+    name: Flux Cheap Period End
+    has_date: false
+    has_time: true
