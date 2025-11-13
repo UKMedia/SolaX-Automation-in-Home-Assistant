@@ -2,210 +2,85 @@
 # Source: DAI + RBC Framework (Reference – Design-Doc v5.9)
 # Sanitised for public repo – replace <PLACEHOLDERS> for your system before enabling writes
 
-alias: DAI – Grid Charge Controller v6.4
+alias: DAI – Actual Demand 16-22 Tariff Switcher v1.3
 description: >
-  Code created/updated by ChatGPT (GPT-5 Thinking). v6.4 (CR016 – Cold-Day
-  Planning via Adjusted Minimum Temperature): Adds proactive cold-day planning
-  using input_boolean.dai_cold_day_flag alongside the existing reactive
-  outside-temperature check. When the flag is ON, target SOC plans for 100 %
-  during cheap windows; all timing, guards, and Master-only write rules remain
-  unchanged. Design Ref: DAI + RBC Framework v5.8.7 (§5.6 Grid Charge
-  Controller) + CR016 alignment to HLD v1.1 §4.2 & §5.6. Change History: v6.4
-  (CR016 – add proactive cold-day logic); v6.3 (DR003 – Boolean integration
-  fix). Governance: Protected Architecture Mode v5.9 + Two-Phase Code Change
-  Gate v2.2 + Meta-Patch M1 active. Compliance: Visual-Editor-safe
-  (`action`/`target`/`data`; triggers have id; choose has default; Master-only
-  writes; HA-start guard present).
+  Code created/updated by ChatGPT (GPT-5 Thinking). v1.3 (PARAM-ONLY – entity
+  alignment): Controls <YOUR_INPUT_SELECT_ENTITY> with canonical options
+  `off` and `active_16-22`. Behaviour unchanged: sets active during 16:00–22:00
+  and off otherwise, with HA-start self-heal. Change History: v1.3
+  (entity/domain + option normalisation); v1.2 (selector id fix); v1.1
+  (comments); v1.0 (initial).
 triggers:
-  - id: t_tick_1min
-    trigger: time_pattern
-    minutes: /1
-  - id: t_inwindow_25
-    alias: In-window confirmation write (:25)
-    trigger: time_pattern
-    minutes: 25
-  - id: t_inwindow_55
-    alias: In-window top-up write (:55)
-    trigger: time_pattern
-    minutes: 55
-  - id: t_tariff_change
-    trigger: state
-    entity_id: input_select.octopus_import_tariff
+  - id: t_1600
+    trigger: time
+    at: "16:00:00"
+  - id: t_2200
+    trigger: time
+    at: "22:00:00"
   - id: t_ha_start
     trigger: homeassistant
     event: start
-  - id: t_horizon_change
-    trigger: state
-    entity_id: input_number.rbc_adjusted_demand_next_horizon_kwh
-  - id: t_temp_change
-    trigger: state
-    entity_id: sensor.ashp_hot_water_outside_temperature
-  - id: t_prewindow_cosy_night
-    alias: Cosy pre-window primer (21:55)
-    trigger: time
-    at: "21:55:00"
-  - id: t_prewindow_cosy_morning
-    alias: Cosy pre-window primer (03:55)
-    trigger: time
-    at: "03:55:00"
-  - id: t_prewindow_cosy_day
-    alias: Cosy pre-window primer (12:55)
-    trigger: time
-    at: "12:55:00"
-  - id: t_prewindow_flux
-    alias: Flux pre-window primer (01:55)
-    trigger: time
-    at: "01:55:00"
 conditions: []
 actions:
   - choose:
       - conditions:
-          - condition: template
-            value_template: "{{ is_state('input_boolean.dai_session_override_active','off') }}"
+          - condition: trigger
+            id: t_1600
         sequence:
-          - target:
-              entity_id: input_number.dai_target_soc_planned_pct
+          - action: input_select.select_option
+            target:
+              entity_id: <YOUR_INPUT_SELECT_ENTITY>
             data:
-              value: "{{ target_pct_calc }}"
-            action: input_number.set_value
-          - if:
-              - condition: template
-                value_template: "{{ write_needed }}"
-            then:
-              - target:
-                  entity_id: number.solax_house_selfuse_nightcharge_upper_soc
+              option: active_16-22
+          - action: logbook.log
+            data:
+              name: DAI – Tariff Switcher
+              message: Switched mode to active_16-22 at 16:00.
+      - conditions:
+          - condition: trigger
+            id: t_2200
+        sequence:
+          - action: input_select.select_option
+            target:
+              entity_id: <YOUR_INPUT_SELECT_ENTITY>
+            data:
+              option: "off"
+          - action: logbook.log
+            data:
+              name: DAI – Tariff Switcher
+              message: Switched mode to off at 22:00.
+      - conditions:
+          - condition: trigger
+            id: t_ha_start
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: time
+                    after: "16:00:00"
+                    before: "22:00:00"
+                sequence:
+                  - action: input_select.select_option
+                    target:
+                      entity_id: <YOUR_INPUT_SELECT_ENTITY>
+                    data:
+                      option: active_16-22
+                  - action: logbook.log
+                    data:
+                      name: DAI – Tariff Switcher
+                      message: HA start self-heal set mode to active_16-22.
+            default:
+              - action: input_select.select_option
+                target:
+                  entity_id: <YOUR_INPUT_SELECT_ENTITY>
                 data:
-                  value: "{{ target_pct_calc }}"
-                action: number.set_value
-              - data:
-                  name: DAI – Grid Charge Controller
-                  entity_id: input_text.dai_night_planner_reason
-                  message: >-
-                    {{ trigger_tag }} – Inverter target updated to {{
-                    target_pct_calc }} % (prev={{ current_inverter_target }} %,
-                    entity=number.solax_house_selfuse_nightcharge_upper_soc).
-                action: logbook.log
-          - if:
-              - condition: template
-                value_template: "{{ log_needed }}"
-            then:
-              - data:
-                  name: DAI – Grid Charge Controller
-                  entity_id: input_text.dai_night_planner_reason
-                  message: >-
-                    {{ trigger_tag }} – Planner computed {{ target_pct_calc }} %
-                    (Tariff={{ tariff }}, Branch={{ branch_name }}, Demand={{
-                    demand_pct | round(1) }} %, Floor={{ floor_pct }}, Base={{
-                    base_pct | round(1) }} %, Evening={{ buffer_eff }} %,
-                    Const={{ buffer_const_pct }} %, Reserve={{ reserve_floor_pct
-                    | float(0) }} %, Cold={{ is_cold }}, Δ={{ delta_pct |
-                    round(1) }} %, Write={{ 'Yes' if write_needed else 'No' }}).
-                action: logbook.log
-              - condition: template
-                value_template: "{{ debug_on }}"
-              - data:
-                  name: DAI – Grid Charge Controller (Debug)
-                  entity_id: input_text.dai_night_planner_reason
-                  message: >-
-                    H0={{ horizon_kwh | round(2) }} kWh, Usable={{ usable_kwh |
-                    round(2) }} kWh, Demand%={{ demand_pct | round(1) }},
-                    Base%={{ base_pct | round(1) }}, Evening%={{ buffer_eff }},
-                    Const%={{ buffer_const_pct }}, Target%={{ target_pct_calc
-                    }}, InverterTarget%={{ current_inverter_target | round(0)
-                    }}, Reserve%={{ reserve_floor_pct | float(0) }}, Outside={{
-                    outside_temp_c | round(1) }} °C ≤Thresh={{ (outside_temp_c
-                    <= cold_threshold_c) }}, Tariff={{ tariff }}, Trigger={{
-                    trigger.id | default('n/a') }}.
-                action: logbook.log
+                  option: "off"
+              - action: logbook.log
+                data:
+                  name: DAI – Tariff Switcher
+                  message: HA start self-heal set mode to off (outside 16:00–22:00).
     default:
-      - data:
-          name: DAI – Grid Charge Controller
-          entity_id: input_text.dai_night_planner_reason
-          message: Default branch hit – no matching conditions.
-        action: logbook.log
+      - action: logbook.log
+        data:
+          name: DAI – Tariff Switcher
+          message: Default branch hit – no change.
 mode: single
-variables:
-  debug_on: "{{ is_state('input_boolean.dai_debug_night_planner','on') }}"
-  tariff: "{{ states('input_select.octopus_import_tariff') }}"
-  horizon_kwh: "{{ states('input_number.rbc_adjusted_demand_next_horizon_kwh') | float(0) }}"
-  cap_total_kwh: "{{ states('input_number.total_battery_capacity_kwh') | float(0) }}"
-  reserve_floor_pct: "{{ states('input_number.dai_min_soc_hard_floor') | float(0) }}"
-  floor_cosy_pct: "{{ states('input_number.dai_min_soc_floor_cosy') | float(10) }}"
-  floor_flux_pct: "{{ states('input_number.dai_min_soc_floor_flux') | float(10) }}"
-  outside_temp_c: "{{ states('sensor.ashp_hot_water_outside_temperature') | float(99) }}"
-  cold_threshold_c: "{{ states('input_number.dai_cold_temp_threshold_c') | float(5) }}"
-  buffer_pct: |-
-    {{ (states('input_number.dai_evening_buffer_auto_suggest_pct') | float(0))
-       if is_state('input_boolean.dai_evening_buffer_auto','on')
-       else (states('input_number.dai_evening_buffer_pct') | float(0)) }}
-  buffer_const_pct: "{{ states('input_number.dai_soc_buffer_pct') | float(0) }}"
-  is_cosy: "{{ tariff == 'Cosy' }}"
-  is_flux: "{{ tariff == 'Flux' }}"
-  usable_kwh: "{{ (cap_total_kwh * (1 - reserve_floor_pct / 100)) | float(0) }}"
-  demand_pct: |-
-    {% if usable_kwh > 0 %}
-      {% set capped_h = ([horizon_kwh | float(0), usable_kwh] | min) %}
-      {{ (capped_h / usable_kwh * 100) | round(1) }}
-    {% else %}0{% endif %}
-  floor_pct: >-
-    {% if is_cosy %}{{ floor_cosy_pct }} {% elif is_flux %}{{ floor_flux_pct }}
-    {% else %}0{% endif %}
-  now_hm: "{{ now().strftime('%H:%M') }}"
-  cosy_window_active: |-
-    {{ ('22:00' <= now_hm <= '23:59')
-       or ('04:00' <= now_hm <= '05:00')
-       or ('13:00' <= now_hm <= '16:00') }}
-  flux_window_active: "{{ '02:00' <= now_hm <= '04:00' }}"
-  cheap_window_active: "{{ (is_cosy and cosy_window_active) or (is_flux and flux_window_active) }}"
-  buffer_active: "{{ '13:00' <= now_hm <= '16:00' }}"
-  buffer_eff: "{{ buffer_pct if buffer_active else 0 }}"
-  is_cold: >-
-    {{ is_state('input_boolean.dai_cold_day_flag','on') or (outside_temp_c <=
-    cold_threshold_c) }}
-  base_pct: "{{ [demand_pct | float(0), floor_pct | float(0)] | max }}"
-  target_unclamped: "{{ base_pct + buffer_eff + buffer_const_pct }}"
-  target_pct_calc: |-
-    {% if is_cold %}
-      100
-    {% else %}
-      {% set clamped = [ [target_unclamped | float(0), 10] | max, 100 ] | min %}
-      {{ clamped | round(0, default=0) }}
-    {% endif %}
-  prev_target: "{{ states('input_number.dai_target_soc_planned_pct') | float(0) }}"
-  delta_pct: "{{ (target_pct_calc - prev_target) | abs }}"
-  log_needed: >-
-    {{ delta_pct >= 1 or trigger.id in
-    ['t_ha_start','t_tariff_change','t_temp_change','t_horizon_change',
-     't_prewindow_cosy_night','t_prewindow_cosy_morning','t_prewindow_cosy_day','t_prewindow_flux',
-     't_inwindow_25','t_inwindow_55'] }}
-  branch_name: "{% if is_cosy %}Cosy{% elif is_flux %}Flux{% else %}Other{% endif %}"
-  trigger_tag: >-
-    {% set id = trigger.id | default('n/a') %} {% if id in
-    ['t_prewindow_cosy_night','t_prewindow_cosy_morning','t_prewindow_cosy_day','t_prewindow_flux']
-    %}
-      Pre-Window
-    {% elif id == 't_inwindow_25' %}
-      In-Window:25
-    {% elif id == 't_inwindow_55' %}
-      In-Window:55
-    {% elif id == 't_ha_start' %}
-      HA-Start
-    {% elif id == 't_tariff_change' %}
-      Tariff-Change
-    {% elif id == 't_temp_change' %}
-      Temp-Change
-    {% elif id == 't_horizon_change' %}
-      Horizon-Change
-    {% elif id == 't_tick_1min' %}
-      Tick
-    {% else %}
-      Other
-    {% endif %}
-  current_inverter_target: "{{ states('number.solax_house_selfuse_nightcharge_upper_soc') | float(0) }}"
-  write_deadband_met: "{{ (target_pct_calc - current_inverter_target) | abs >= 1 }}"
-  cheap_tariff: "{{ is_cosy or is_flux }}"
-  write_gate_ok: >-
-    {{ (trigger.id in
-    ['t_prewindow_cosy_night','t_prewindow_cosy_morning','t_prewindow_cosy_day','t_prewindow_cosy_flux'])
-       or ((trigger.id in ['t_inwindow_25','t_inwindow_55']) and cheap_window_active) }}
-  write_needed: "{{ cheap_tariff and write_gate_ok and write_deadband_met }}"
